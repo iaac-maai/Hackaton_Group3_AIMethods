@@ -22,6 +22,7 @@ import { assessQuality, type Quality } from "./pose/quality";
 import { extractVideo, type VideoExtraction } from "./pose/sampleVideo";
 import { minRecordSeconds } from "./recording";
 import type { ReviewClip } from "./review";
+import { ModelEvaluation } from "./components/ModelEvaluation";
 import { clampThreshold, classify, isTrained, sliderRange } from "./threshold";
 
 // Video-first keypoint analysis. The video stays in this browser: MoveNet extracts one pose per
@@ -69,7 +70,9 @@ function AppContent() {
   const resultSection = useRef<HTMLElement>(null);
   const runSeq = useRef(0);
   const [recording, setRecording] = useState(false);
-  const [tab, setTab] = useState<"analysis" | "schedule">("analysis");
+  const [tab, setTab] = useState<"analysis" | "schedule" | "model">("analysis");
+  const [modelSeen, setModelSeen] = useState(false);
+  useEffect(() => { if (tab === "model") setModelSeen(true); }, [tab]);
   const [multiMode, setMultiMode] = useState(false);
   const [multiSettings, setMultiSettings] = useState<MultiSettings>(DEFAULT_MULTI);
   const [multiFile, setMultiFile] = useState<File | null>(null);
@@ -276,10 +279,12 @@ function AppContent() {
         <p className="app-tagline">
           {tab === "analysis"
             ? "Video movement analysis. Your video is processed in this browser and is never uploaded; only body keypoints are sent for scoring."
-            : "Draft a shift plan with regular breaks. It stays on this page and isn’t saved or sent anywhere."}
+            : tab === "schedule"
+              ? "Draft a shift plan with regular breaks. It stays on this page and isn’t saved or sent anywhere."
+              : "How the movement model was evaluated: drag any 3D graph to orbit it."}
         </p>
-        <Tabs label="Motion Atlas sections" selected={tab} onSelect={(id) => setTab(id as "analysis" | "schedule")}
-          tabs={[{ id: "analysis", label: <>Analysis{activity && <span className="tab-activity">{activity}</span>}</> }, { id: "schedule", label: "Schedule" }]} />
+        <Tabs label="Motion Atlas sections" selected={tab} onSelect={(id) => setTab(id as "analysis" | "schedule" | "model")}
+          tabs={[{ id: "analysis", label: <>Analysis{activity && <span className="tab-activity">{activity}</span>}</> }, { id: "schedule", label: "Schedule" }, { id: "model", label: "Model" }]} />
       </header>
 
       <div role="tabpanel" id={panelId("analysis")} aria-labelledby={tabId("analysis")} hidden={tab !== "analysis"}>
@@ -484,6 +489,10 @@ function AppContent() {
 
       <div role="tabpanel" id={panelId("schedule")} aria-labelledby={tabId("schedule")} hidden={tab !== "schedule"}>
         <SchedulePlanner reviewClips={reviewClips} onRemoveClip={(id) => setReviewClips((cs) => cs.filter((c) => c.id !== id))} />
+      </div>
+
+      <div role="tabpanel" id={panelId("model")} aria-labelledby={tabId("model")} hidden={tab !== "model"}>
+        {modelSeen && <ModelEvaluation />}
       </div>
     </main>
   );
