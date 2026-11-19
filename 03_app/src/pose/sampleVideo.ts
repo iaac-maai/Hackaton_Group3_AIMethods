@@ -1,3 +1,4 @@
+import { describeAppearance } from "./appearance";
 import { FPS, type Frame } from "./coco";
 import { detectFrame, detectMulti, type DetectedPose, type Detector } from "./movenet";
 
@@ -189,6 +190,13 @@ export interface MultiExtraction {
   elapsedMs: number;
 }
 
+/** Add each pose's coarse clothing colour (used only to keep fragments of different people apart). */
+export function withAppearance(canvas: HTMLCanvasElement, poses: DetectedPose[]): DetectedPose[] {
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  if (!ctx) return poses;
+  return poses.map((p) => ({ ...p, app: describeAppearance(ctx, p.kp) }));
+}
+
 /** EXPERIMENTAL multi-person extraction: every detected person per frame, with tracker IDs. */
 export async function extractVideoMulti(
   src: string,
@@ -199,7 +207,9 @@ export async function extractVideoMulti(
   // No detector.reset() here: MoveNet MultiPose's reset() touches single-pose smoothing filters it
   // never created and throws. Pass a freshly created detector for each clip instead.
   const poses: DetectedPose[][] = [];
-  const v = await sampleFrames(src, async (canvas, _k, ts) => { poses.push(await detectMulti(detector, canvas, ts)); }, onProgress);
+  const v = await sampleFrames(src, async (canvas, _k, ts) => {
+    poses.push(withAppearance(canvas, await detectMulti(detector, canvas, ts)));
+  }, onProgress);
   return {
     poses, mediaTimes: v.mediaTimes, width: v.width, height: v.height, durationS: v.durationS,
     sourceFrameS: v.sourceFrameS, elapsedMs: performance.now() - t0,

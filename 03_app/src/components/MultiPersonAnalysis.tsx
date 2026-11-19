@@ -1,9 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { analyzeKeypoints, ApiError, type KeypointResult, type ScoredWindow } from "../api";
+import { analyzeKeypoints, ApiError } from "../api";
 import { EMPTY_FRAME, FPS, WINDOW } from "../pose/coco";
 import { createMultiDetector, MULTI_EXTRACTOR, type MultiSettings } from "../pose/movenet";
 import { extractVideoMulti, type MultiExtraction } from "../pose/sampleVideo";
-import { buildTracks, describeIssues, segmentFrames, trackSummary, type Track, type TrackResult } from "../pose/tracks";
+import {
+  buildTracks, clockAt, describeIssues, NO_EDITS, presentTrack, reviewTracks, segKey, segmentFrames, segmentsToScore, trackTimes,
+  withheldSegments, type SegScore, type Track, type TrackEdits, type TrackPresentation, type TrackScore,
+} from "../pose/tracks";
 import { clampThreshold, classify, isTrained, sliderRange } from "../threshold";
 import { ScoreTimeline } from "./ScoreTimeline";
 import { ThresholdControl } from "./ThresholdControl";
@@ -13,17 +16,18 @@ import type { ReviewClip } from "../review";
 // Multi-person mode. Every detected person gets a temporary label (Track A, B, C …)
 // that only applies within this clip. Each track is scored separately, per continuous segment, with
 // the unchanged model and trained threshold. Nothing here is saved to History.
+// Where the tracker lost someone and the app joined the pieces, the identity is marked uncertain and
+// the user can separate or merge tracks. Scores are cached per segment (one tracker ID's frames), so
+// edits only change which segments make up a track, never a segment's score. Only segmentsToScore()
+// is ever sent: a segment that may contain two people (unlocated identity switch) is withheld.
+// Pieces joined only by an automatic uncertain link (a long gap, or a brief gap with a doubt or
+// identity-switch warning) are never shown as one person's result: such a track is presented per
+// identity stretch (presentTrack) until the user confirms or separates.
 
 export const TRACK_COLORS = ["#00d0ff", "#ffb400", "#ff5cd6", "#7dff3a", "#ff7043", "#b39dff", "#40e0d0", "#ffe08a"];
 const WINDOW_S = WINDOW / FPS;
 const clock = (s: number) => `${Math.floor(s / 60)}:${(s % 60).toFixed(1).padStart(4, "0")}`;
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
-
-type TrackScore =
-  | { kind: "pending" }
-  | { kind: "not-scoreable"; reason: string }
-  | { kind: "error"; message: string }
-  | { kind: "scored"; result: KeypointResult; skippedSegments: number };
 
 type Stage =
   | { kind: "loading" }
@@ -40,33 +44,14 @@ interface Props {
   inReview: (id: string) => boolean;
 }
 
-/** Merge one track's per-segment results onto the clip timeline (times are offset by the segment start). */
-function mergeSegments(parts: { start: number; result: KeypointResult }[]): KeypointResult {
-  const windows: ScoredWindow[] = parts
-    .flatMap(({ start, result }) => result.windows.map((w) => ({
-      ...w,
-      start_sample: w.start_sample + start,
-      start_seconds: Math.round((w.start_seconds + start / FPS) * 1000) / 1000,
-      end_seconds: Math.round(((w.end_seconds ?? w.start_seconds + WINDOW_S) + start / FPS) * 1000) / 1000,
-    })))
-    .sort((a, b) => a.start_seconds - b.start_seconds)
-    .map((w, i) => ({ ...w, window: i + 1 }));
-  const above = windows.filter((w) => w.above_threshold).length;
-  const first = parts[0].result;
-  return {
-    model: first.model, threshold: first.threshold, interpretation: first.interpretation, posture_summary: {},
-    windows, windows_analyzed: windows.length, windows_above_threshold: above,
-    percentage_above_threshold: windows.length ? (above / windows.length) * 100 : 0,
-  };
-}
-
 export function MultiPersonAnalysis({ file, settings, onBusy, onAddToReview, inReview }: Props) {
   const [stage, setStage] = useState<Stage>({ kind: "loading" });
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [extraction, setExtraction] = useState<MultiExtraction | null>(null);
-  const [tracked, setTracked] = useState<TrackResult | null>(null);
-  const [scores, setScores] = useState<Record<string, TrackScore>>({});
+  const [edits, setEdits] = useState<TrackEdits>(NO_EDITS);
+  const [segScores, setSegScores] = useState<Record<string, SegScore>>({});
   const [selected, setSelected] = useState<string | null>(null);
+  const [stretchIdx, setStretchIdx] = useState<number | null>(null);   // chosen stretch; null = first scored one
   const [showSkeleton, setShowSkeleton] = useState(true);
   const [userThreshold, setUserThreshold] = useState<number | null>(null);
   const player = useRef<VideoPlayerHandle>(null);
@@ -76,7 +61,7 @@ export function MultiPersonAnalysis({ file, settings, onBusy, onAddToReview, inR
     const id = ++runId.current;
     const live = () => id === runId.current;
     const url = URL.createObjectURL(file);
-    setVideoUrl(url); setExtraction(null); setTracked(null); setScores({}); setSelected(null); setUserThreshold(null);
+    setVideoUrl(url); setExtraction(null); setEdits(NO_EDITS); setSegScores({}); setSelected(null); setUserThreshold(null);
     onBusy(true);
     (async () => {
       let ex: MultiExtraction;
@@ -95,57 +80,84 @@ export function MultiPersonAnalysis({ file, settings, onBusy, onAddToReview, inR
       }
       if (!live()) return;
       const tr = buildTracks(ex.poses);
-      setExtraction(ex); setTracked(tr);
+      setExtraction(ex);
       setSelected(tr.tracks.find((t) => t.scoreable)?.label ?? tr.tracks[0]?.label ?? null);
-      const initial: Record<string, TrackScore> = {};
-      for (const t of tr.tracks) {
-        const sum = trackSummary(t);
-        initial[t.label] = t.scoreable ? { kind: "pending" } : {
-          kind: "not-scoreable",
-          reason: sum.duplicate ? "This looks like a second detection of another track, so it isn’t scored."
-            : "Not enough continuous tracking to score: no stretch of at least "
-              + `${WINDOW_S.toFixed(2)} s where this person was tracked without interruption and enough body points were visible.`,
-        };
-      }
-      setScores(initial);
-      await scoreTracks(tr, initial, live);
+      await scoreSegments(tr.tracks, {}, live);
       if (live()) setStage({ kind: "done" });
     })().finally(() => { if (live()) onBusy(false); });
     return () => { runId.current++; URL.revokeObjectURL(url); onBusy(false); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [file, settings.maxDimension, settings.tracker]);
 
-  async function scoreTracks(tr: TrackResult, current: Record<string, TrackScore>, live: () => boolean) {
-    const todo = tr.tracks.filter((t) => current[t.label]?.kind === "pending" || current[t.label]?.kind === "error");
-    for (const t of todo) {
-      if (!live()) return;
-      const segs = t.segments.filter((s) => s.scoreableWindows > 0);
-      const parts: { start: number; result: KeypointResult }[] = [];
-      let skipped = 0, failure: string | null = null;
+  /** Score every scoreable segment not yet in `known` (one request per segment, as before). An error stops that track. */
+  async function scoreSegments(tracks: Track[], known: Record<string, SegScore>, live: () => boolean) {
+    for (const t of tracks) {
+      const segs = segmentsToScore(t).filter((s) => !known[segKey(s)] || known[segKey(s)].kind === "error");
       for (let i = 0; i < segs.length; i++) {
         if (!live()) return;
         setStage({ kind: "scoring", label: t.label, done: i, total: segs.length });
+        let r: SegScore;
         try {
-          parts.push({ start: segs[i].start, result: await analyzeKeypoints(segmentFrames(t, segs[i], EMPTY_FRAME)) });
+          r = { kind: "ok", result: await analyzeKeypoints(segmentFrames(t, segs[i], EMPTY_FRAME)) };
         } catch (e) {
-          if (e instanceof ApiError && e.status === 422) skipped++;
-          else { failure = errText(e); break; }
+          r = e instanceof ApiError && e.status === 422 ? { kind: "skipped" } : { kind: "error", message: errText(e) };
         }
+        if (!live()) return;
+        setSegScores((s) => ({ ...s, [segKey(segs[i])]: r }));
+        if (r.kind === "error") break;
       }
-      if (!live()) return;
-      const next: TrackScore = failure ? { kind: "error", message: failure }
-        : parts.length ? { kind: "scored", result: mergeSegments(parts), skippedSegments: skipped }
-        : { kind: "not-scoreable", reason: "Not enough continuous tracking to score: the server found no window with enough visible body points." };
-      setScores((s) => ({ ...s, [t.label]: next }));
     }
   }
 
+  const tracked = useMemo(() => (extraction ? buildTracks(extraction.poses, {}, edits) : null), [extraction, edits]);
+  const pres: Record<string, TrackPresentation> = useMemo(() => {
+    const out: Record<string, TrackPresentation> = {};
+    for (const t of tracked?.tracks ?? []) out[t.label] = presentTrack(t, segScores);
+    return out;
+  }, [tracked, segScores]);
+  const anyScored = (p?: TrackPresentation) => p != null && (p.kind === "combined" ? p.score.kind === "scored" : p.stretches.some((x) => x.score.kind === "scored"));
+
+  // After an edit, score any segment that is new to a track (normally none: edits don't change segments).
+  const editRun = useRef(0);
+  useEffect(() => {
+    if (!tracked || stage.kind !== "done") return;
+    const missing = tracked.tracks.some((t) => segmentsToScore(t).some((s) => !segScores[segKey(s)]));
+    if (!missing) return;
+    const id = runId.current, my = ++editRun.current;
+    onBusy(true);
+    scoreSegments(tracked.tracks, segScores, () => id === runId.current && my === editRun.current)
+      .finally(() => { if (id === runId.current) { setStage({ kind: "done" }); onBusy(false); } });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tracked]);
+
+  useEffect(() => {
+    if (tracked && selected && !tracked.tracks.some((t) => t.label === selected)) setSelected(tracked.tracks[0]?.label ?? null);
+  }, [tracked, selected]);
+
+  const editsCount = edits.separate.length + edits.merge.length + (edits.confirm?.length ?? 0);
+  const separateLink = (key: string) => setEdits((e) => ({ ...e, separate: [...e.separate.filter((k) => k !== key), key] }));
+  const mergeTracks = (a: Track, b: Track) => setEdits((e) => ({ ...e, merge: [...e.merge, [a.parts[0], b.parts[0]]] }));
+  const confirmLink = (key: string) => setEdits((e) => ({ ...e, confirm: [...(e.confirm ?? []).filter((k) => k !== key), key] }));
+  const undoMerges = (t: Track) => {
+    const ids = new Set<string>([...t.parts, ...t.rawIds.map(String), ...t.absorbed.map(String)]);
+    const keys = new Set(t.links.map((l) => l.key));
+    setEdits((e) => ({
+      ...e, merge: e.merge.filter(([x, y]) => !(ids.has(String(x)) && ids.has(String(y)))),
+      confirm: (e.confirm ?? []).filter((k) => !keys.has(k)),
+    }));
+  };
+
   const track: Track | null = tracked?.tracks.find((t) => t.label === selected) ?? null;
-  const score = selected ? scores[selected] : undefined;
+  const trackPres = selected ? pres[selected] : undefined;
+  const stretchView = trackPres?.kind === "per-stretch"
+    ? trackPres.stretches.find((x) => x.stretch.index === stretchIdx)
+      ?? trackPres.stretches.find((x) => x.score.kind === "scored") ?? trackPres.stretches[0] : null;
+  const score: TrackScore | undefined = trackPres?.kind === "combined" ? trackPres.score : stretchView?.score;
   const result = score?.kind === "scored" ? score.result : null;
   const colorOf = (label: string) => TRACK_COLORS[(tracked?.tracks.findIndex((t) => t.label === label) ?? 0) % TRACK_COLORS.length];
 
-  useEffect(() => { setUserThreshold(null); }, [selected]);
+  useEffect(() => { setUserThreshold(null); setStretchIdx(null); }, [selected]);
+  useEffect(() => { setUserThreshold(null); }, [stretchIdx]);
   const trained = result?.threshold ?? 0;
   const range = useMemo(() => sliderRange(result?.windows.map((w) => w.reconstruction_score) ?? [], trained), [result, trained]);
   const shown = userThreshold ?? trained;
@@ -182,8 +194,14 @@ export function MultiPersonAnalysis({ file, settings, onBusy, onAddToReview, inR
             {tracked.brief.length > 0 && ` · ${tracked.brief.length} brief detection${tracked.brief.length > 1 ? "s" : ""} (under 0.5 s) ignored`}
             {` · ${MULTI_EXTRACTOR}, ${settings.maxDimension} px, ${settings.tracker === "keypoint" ? "keypoint" : "bounding-box"} tracker`}
           </p>
+          {editsCount > 0 && (
+            <p className="muted">
+              You changed the tracking ({editsCount} edit{editsCount > 1 ? "s" : ""}).{" "}
+              <button type="button" className="button-secondary" disabled={busy} onClick={() => setEdits(NO_EDITS)}>Undo all tracking edits</button>
+            </p>
+          )}
 
-          {stage.kind === "done" && settings.maxDimension < 512 && !tracked.tracks.some((t) => scores[t.label]?.kind === "scored") && (
+          {stage.kind === "done" && settings.maxDimension < 512 && !tracked.tracks.some((t) => anyScored(pres[t.label])) && (
             <p className="note-warn" role="status">
               No one could be scored with the {settings.maxDimension} px detector. If the people are small or far away in the frame, try a
               larger detector input size above (384 or 512 px). On our test clips that found small workers, but it also split some people into several tracks.
@@ -191,14 +209,11 @@ export function MultiPersonAnalysis({ file, settings, onBusy, onAddToReview, inR
           )}
           {stage.kind === "done" && tracked.tracks.length > 0 && (() => {
             const clip: ReviewClip = {
-              id: `multi:${file.name}:${file.size}:${file.lastModified}:${settings.maxDimension}:${settings.tracker}`,
+              id: `multi:${file.name}:${file.size}:${file.lastModified}:${settings.maxDimension}:${settings.tracker}`
+                + (editsCount ? `:edits:${edits.separate.join(",")}|${edits.merge.map((m) => m.join("+")).join(",")}|${(edits.confirm ?? []).join(",")}` : ""),
               name: file.name, durationS, source: "multi",
-              tracks: tracked.tracks.map((t) => {
-                const sc = scores[t.label];
-                return sc?.kind === "scored"
-                  ? { key: t.label, label: `Track ${t.label}`, scored: true, windows: sc.result.windows.length, aboveTrained: sc.result.windows_above_threshold }
-                  : { key: t.label, label: `Track ${t.label}`, scored: false, windows: 0, aboveTrained: 0 };
-              }),
+              // One entry per track, or per stretch where the identity across a long gap isn't confirmed.
+              tracks: tracked.tracks.flatMap((t) => reviewTracks(t, pres[t.label])),
             };
             return (
               <div className="review-add">
@@ -212,19 +227,23 @@ export function MultiPersonAnalysis({ file, settings, onBusy, onAddToReview, inR
           {tracked.tracks.length > 0 && (
             <div className="track-picker" role="group" aria-label="Choose a track">
               {tracked.tracks.map((t) => {
-                const sc = scores[t.label];
-                const status = sc?.kind === "scored"
+                const p = pres[t.label];
+                const sc = p?.kind === "combined" ? p.score : undefined;
+                const status = p?.kind === "per-stretch"
+                  ? (p.stretches.some((x) => x.score.kind === "pending") && busy ? "Scoring…" : `identity not confirmed · results for ${p.stretches.length} stretches, not combined`)
+                  : sc?.kind === "scored"
                   ? `${sc.result.windows_above_threshold} of ${sc.result.windows.length} windows above threshold`
                   : sc?.kind === "pending" ? (busy ? "Scoring…" : "Waiting")
                   : sc?.kind === "error" ? "Scoring failed"
+                  : withheldSegments(t).length ? "Not scored: possible identity switch"
                   : "Not enough continuous tracking to score";
                 return (
-                  <button key={t.label} type="button" className={`track-chip ${t.label === selected ? "on" : ""} ${sc?.kind === "scored" ? "" : "muted-chip"}`}
+                  <button key={t.label} type="button" className={`track-chip ${t.label === selected ? "on" : ""} ${anyScored(p) ? "" : "muted-chip"}`}
                     aria-pressed={t.label === selected} onClick={() => setSelected(t.label)}>
                     <span className="track-swatch" style={{ background: colorOf(t.label) }} aria-hidden="true">{t.label}</span>
                     <span className="track-chip-text">
-                      <strong>Track {t.label}</strong>
-                      <span>{Math.round((t.present / tracked.frameCount) * 100)}% of clip · {status}</span>
+                      <strong>Track {t.label}{t.identity === "uncertain" && <span className="pill pill-uncertain">identity uncertain</span>}</strong>
+                      <span>{trackTimes(t, tracked.frameCount).firstSeen}–{trackTimes(t, tracked.frameCount).lastSeen} · {Math.round((t.present / tracked.frameCount) * 100)}% of clip · {status}</span>
                     </span>
                   </button>
                 );
@@ -235,6 +254,29 @@ export function MultiPersonAnalysis({ file, settings, onBusy, onAddToReview, inR
           {track && (
             <div className="track-detail">
               <h2>Track {track.label}</h2>
+              <IdentityPanel track={track} tracks={tracked.tracks} frameCount={tracked.frameCount} disabled={busy}
+                onPlay={(sec) => player.current?.playFrom(sec)} onSeparate={separateLink} onConfirm={confirmLink} onMerge={mergeTracks} onUndoMerge={undoMerges} />
+              {trackPres?.kind === "per-stretch" && (
+                <div className="stretches" role="group" aria-label={`Identity stretches of Track ${track.label}`}>
+                  <p className="note-warn">
+                    <strong>Identity not confirmed.</strong> Track {track.label} joins {trackPres.stretches.length} stretches where the tracker lost the
+                    person and the join isn’t certain: a long gap, or a brief one where something doesn’t match or another person was close (see the
+                    warnings below). They may be different people, so their results are shown separately and never combined.
+                    If you know it’s one person, use “Confirm same person” above; if not, “Separate”.
+                  </p>
+                  {trackPres.stretches.map(({ stretch: st, score: sc }) => (
+                    <button key={st.index} type="button" className={`button-secondary stretch-chip ${st.index === stretchView?.stretch.index ? "on" : ""}`}
+                      aria-pressed={st.index === stretchView?.stretch.index} onClick={() => setStretchIdx(st.index)}>
+                      Stretch {st.index} · {clockAt(st.start)}–{clockAt(st.end)} · {sc.kind === "scored"
+                        ? `${sc.result.windows_above_threshold} of ${sc.result.windows.length} windows above threshold`
+                        : sc.kind === "pending" ? "scoring…" : sc.kind === "error" ? "scoring failed" : "not scored"}
+                    </button>
+                  ))}
+                </div>
+              )}
+              {trackPres?.kind === "combined" && trackPres.confirmedByUser && (
+                <p className="muted">Includes pieces you joined or confirmed as one person; the result below combines them on your say-so.</p>
+              )}
               {describeIssues(track, tracked.frameCount).length > 0 && (
                 <div className="track-warnings" role="note" aria-label={`Tracking warnings for Track ${track.label}`}>
                   <p><strong>Check the overlay:</strong></p>
@@ -249,19 +291,27 @@ export function MultiPersonAnalysis({ file, settings, onBusy, onAddToReview, inR
                     if (!tracked) return;
                     const id = runId.current;
                     onBusy(true);
-                    await scoreTracks(tracked, { [track.label]: score }, () => id === runId.current);
+                    await scoreSegments([track], segScores, () => id === runId.current);
                     if (id === runId.current) { setStage({ kind: "done" }); onBusy(false); }
                   }}>Try again</button>
                 </div>
               )}
               {result && (
                 <>
+                  {withheldSegments(track).length > 0 && (
+                    <p className="note-warn" role="note">
+                      Not scored, because the tracker may have switched people and a score could mix two of them:{" "}
+                      {withheldSegments(track).map((x) => `${clockAt(x.start)}–${clockAt(x.end)}`).join(", ")}.
+                    </p>
+                  )}
                   {score?.kind === "scored" && score.skippedSegments > 0 && (
                     <p className="muted">{score.skippedSegments} tracked stretch{score.skippedSegments > 1 ? "es" : ""} had too few visible points and {score.skippedSegments > 1 ? "were" : "was"} not scored.</p>
                   )}
                   <div className="tiles">
                     <div className={`tile tile-primary ${custom ? "is-custom" : ""}`}>
-                      <span className="tile-label">Track {track.label}: windows above {custom ? "your threshold" : "threshold"}</span>
+                      <span className="tile-label">
+                        {stretchView ? `Track ${track.label}, stretch ${stretchView.stretch.index} only` : `Track ${track.label}`}: windows above {custom ? "your threshold" : "threshold"}
+                      </span>
                       <span className="tile-value">{cls.count} <span className="tile-of">of {result.windows.length}</span></span>
                       <span className="muted">{cls.percent.toFixed(0)}% of scored {WINDOW_S.toFixed(2)} s windows{custom && ` · ${trainedCount} at the trained threshold`}</span>
                     </div>
@@ -310,5 +360,72 @@ export function MultiPersonAnalysis({ file, settings, onBusy, onAddToReview, inR
         </>
       )}
     </section>
+  );
+}
+
+/** First/last visible time, coverage, uncertain stretches, and merge/separate controls for one track. */
+function IdentityPanel({ track, tracks, frameCount, disabled, onPlay, onSeparate, onConfirm, onMerge, onUndoMerge }: {
+  track: Track; tracks: Track[]; frameCount: number; disabled: boolean;
+  onPlay: (seconds: number) => void; onSeparate: (key: string) => void; onConfirm: (key: string) => void;
+  onMerge: (a: Track, b: Track) => void; onUndoMerge: (t: Track) => void;
+}) {
+  const times = trackTimes(track, frameCount, FPS);
+  const byLabel = (l: string) => tracks.find((t) => t.label === l);
+  const suggested = [...new Set(track.issues.flatMap((i) => (i.kind === "possible-same" || i.kind === "duplicate" ? [i.of] : [])))]
+    .map(byLabel).filter((t): t is Track => t != null);
+  const others = tracks.filter((t) => t !== track && !suggested.includes(t));
+  const [mergeWith, setMergeWith] = useState("");
+  return (
+    <div className="identity" aria-label={`Identity of Track ${track.label}`}>
+      <p>
+        <strong>Visible</strong> {times.firstSeen}–{times.lastSeen} · in {Math.round(times.coverage * 100)}% of the clip ·{" "}
+        {track.identity === "uncertain"
+          ? <span className="pill pill-uncertain">identity uncertain</span>
+          : <span className="pill pill-trained">identity consistent</span>}
+      </p>
+      {track.uncertain.length > 0 && (
+        <ul className="uncertain-list">
+          {track.uncertain.map((u) => (
+            <li key={`${u.start}-${u.reason}`}>
+              <button type="button" onClick={() => onPlay(u.start / FPS)}>▶ {clock(u.start / FPS)}–{clock(u.end / FPS)}</button>
+              <span className="muted"> {u.reason}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      <div className="identity-actions">
+        {track.links.filter((l) => l.confidence !== "manual").map((l) => (
+          <button key={l.key} type="button" className="button-secondary" disabled={disabled} onClick={() => onSeparate(l.key)}
+            title="Treat the part after this gap as a different person">
+            Separate at {clock(l.frame / FPS)}
+          </button>
+        ))}
+        {track.links.filter((l) => l.confidence === "uncertain").map((l) => (
+          <button key={`c-${l.key}`} type="button" className="button-secondary" disabled={disabled} onClick={() => onConfirm(l.key)}
+            title="Treat the pieces before and after this gap as one person, and combine their results">
+            Confirm same person at {clock(l.frame / FPS)}
+          </button>
+        ))}
+        {track.links.some((l) => l.confidence === "manual") && (
+          <button type="button" className="button-secondary" disabled={disabled} onClick={() => onUndoMerge(track)}>Undo my merge or confirmation</button>
+        )}
+        {suggested.map((o) => (
+          <button key={o.label} type="button" className="button-secondary" disabled={disabled} onClick={() => onMerge(track, o)}>
+            Same person as Track {o.label}: merge
+          </button>
+        ))}
+        {others.length > 0 && (
+          <span className="merge-other">
+            <select aria-label={`Merge Track ${track.label} with another track`} value={mergeWith} disabled={disabled}
+              onChange={(e) => setMergeWith(e.target.value)}>
+              <option value="">Merge with track…</option>
+              {others.map((o) => <option key={o.label} value={o.label}>Track {o.label}</option>)}
+            </select>
+            <button type="button" className="button-secondary" disabled={disabled || !mergeWith}
+              onClick={() => { const o = byLabel(mergeWith); if (o) onMerge(track, o); setMergeWith(""); }}>Merge</button>
+          </span>
+        )}
+      </div>
+    </div>
   );
 }

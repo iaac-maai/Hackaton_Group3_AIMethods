@@ -39,6 +39,10 @@ File conversions/output_images/
 03_app/**/*.mp4
 03_app/**/*.mov
 03_app/.dev.vars
+# Local regression fixtures with real people's keypoints and clothing colours: keep out of Git
+# until sharing is confirmed (the tests that use them skip when they're missing).
+03_app/test/fixtures/two_workers_wall.json
+03_app/test/fixtures/switch_4.03.35_320.json
 
 # Keep local Claude Code settings out of Git
 .claude/

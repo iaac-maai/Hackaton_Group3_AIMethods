@@ -2,6 +2,7 @@ import * as tf from "@tensorflow/tfjs-core";
 import "@tensorflow/tfjs-backend-webgl";
 import "@tensorflow/tfjs-converter";
 import * as poseDetection from "@tensorflow-models/pose-detection";
+import type { Appearance } from "./appearance";
 import { COCO_NAMES, EMPTY_FRAME, type Frame } from "./coco";
 
 export type Detector = poseDetection.PoseDetector;
@@ -66,7 +67,8 @@ export async function createMultiDetector(s: MultiSettings): Promise<Detector> {
   });
 }
 
-export interface DetectedPose { id: number; score: number; kp: Frame }
+/** `app`: coarse clothing colour (src/pose/appearance.ts), added after detection; stays in the browser. */
+export interface DetectedPose { id: number; score: number; kp: Frame; app?: Appearance | null }
 
 export async function detectMulti(detector: Detector, input: DetectorInput, timestampMs: number): Promise<DetectedPose[]> {
   const poses = await detector.estimatePoses(input, undefined, timestampMs);
