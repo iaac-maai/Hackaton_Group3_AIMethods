@@ -1,8 +1,9 @@
 
 import { useState, type FormEvent } from "react";
 import { authClient } from "./auth-client";
+import logo from "./assets/motion-atlas-logo-compact.png";
 
-export function AuthScreen() {
+export function AuthScreen({ onBack }: { onBack?: () => void } = {}) {
   const [mode, setMode] = useState<"login" | "signup">("login");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -40,8 +41,13 @@ export function AuthScreen() {
 
   return (
     <main className="auth-screen">
+      {onBack && (
+        <button type="button" className="auth-back" onClick={onBack}>
+          <span aria-hidden="true">←</span> Back
+        </button>
+      )}
       <section className="auth-card">
-        <h1>Motion Atlas</h1>
+        <h1><img className="auth-logo" src={logo} alt="Motion Atlas" width={1281} height={303} /></h1>
         <p>Movement safety analysis</p>
 
         <h2>{mode === "login" ? "Log in" : "Create account"}</h2>
