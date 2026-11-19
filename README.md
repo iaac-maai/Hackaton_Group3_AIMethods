@@ -17,7 +17,7 @@ Motion Atlas lets a site lead pick a work video and see **when a worker's moveme
 | Video-keypoint autoencoder | `01_autoencoder/` | Done: three autoencoders and two reference methods compared; the dense AE (16-value code) is deployed |
 | Scoring API (FastAPI + ONNX, on Render) | `02_model_server/` | Deployed; keypoint model in use by the app |
 | Web app (React + Cloudflare Worker + D1) | `03_app/` | Deployed: login, video analysis, History, Schedule, multi-person (experimental) |
-| Model evaluation tab (interactive 3D graphs) | `03_app/public/graphs/` | Added in this branch, local tests pass, not yet deployed |
+| Model evaluation tab (interactive 3D graphs) | `03_app/public/graphs/` | On `main` (PR #7); local tests pass; not yet deployed |
 | Final diagrams | `04_final/diagrams/` | Done: four SVG + PNG diagrams |
 
 Checks: the app's test suite (`npm test` in `03_app`) passes, 145 tests; the app and Worker typecheck cleanly.
