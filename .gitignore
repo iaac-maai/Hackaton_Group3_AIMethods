@@ -39,3 +39,6 @@ File conversions/output_images/
 03_app/**/*.mp4
 03_app/**/*.mov
 03_app/.dev.vars
+
+# Keep local Claude Code settings out of Git
+.claude/

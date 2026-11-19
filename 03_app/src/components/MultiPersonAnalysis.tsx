@@ -8,8 +8,9 @@ import { clampThreshold, classify, isTrained, sliderRange } from "../threshold";
 import { ScoreTimeline } from "./ScoreTimeline";
 import { ThresholdControl } from "./ThresholdControl";
 import { VideoPlayer, type OverlayTrack, type VideoPlayerHandle } from "./VideoPlayer";
+import type { ReviewClip } from "../review";
 
-// EXPERIMENTAL multi-person mode. Every detected person gets a temporary label (Track A, B, C …)
+// Multi-person mode. Every detected person gets a temporary label (Track A, B, C …)
 // that only applies within this clip. Each track is scored separately, per continuous segment, with
 // the unchanged model and trained threshold. Nothing here is saved to History.
 
@@ -35,6 +36,8 @@ interface Props {
   file: File;
   settings: MultiSettings;
   onBusy: (busy: boolean) => void;
+  onAddToReview: (clip: ReviewClip) => void;
+  inReview: (id: string) => boolean;
 }
 
 /** Merge one track's per-segment results onto the clip timeline (times are offset by the segment start). */
@@ -57,7 +60,7 @@ function mergeSegments(parts: { start: number; result: KeypointResult }[]): Keyp
   };
 }
 
-export function MultiPersonAnalysis({ file, settings, onBusy }: Props) {
+export function MultiPersonAnalysis({ file, settings, onBusy, onAddToReview, inReview }: Props) {
   const [stage, setStage] = useState<Stage>({ kind: "loading" });
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [extraction, setExtraction] = useState<MultiExtraction | null>(null);
@@ -159,16 +162,12 @@ export function MultiPersonAnalysis({ file, settings, onBusy }: Props) {
   const busy = stage.kind === "loading" || stage.kind === "extracting" || stage.kind === "scoring";
 
   return (
-    <section className="multi" aria-label="Experimental multi-person analysis">
-      <div className="experimental-banner">
-        <span className="pill pill-exp">Experimental</span>
-        <p>
-          <strong>Multi-person mode.</strong> Each person the detector follows gets a temporary label (Track A, B, C …) that only applies
-          within this video. It doesn’t identify a worker, and the same person can get a different label in another video, or if tracking
-          is lost. Each track is scored separately with the same model and trained threshold as the single-person analysis, but this
-          detector has only been checked on 13 test clips. Results aren’t saved to History.
-        </p>
-      </div>
+    <section className="multi" aria-label="Multiple-people analysis">
+      <p className="multi-note">
+        Track A, B, C … labels apply only within this video and don’t identify a worker. Tracking can miss or switch people, especially when
+        they’re small, partly hidden or close together, so check the overlay. Each track is scored separately with the same model and
+        trained threshold. These results aren’t saved to History.
+      </p>
 
       {stage.kind === "loading" && <p role="status">Loading the multi-person pose model…</p>}
       {stage.kind === "extracting" && <p role="status">Finding people… {stage.total ? `${stage.done} / ${stage.total} frames` : "opening video"}</p>}
@@ -190,6 +189,26 @@ export function MultiPersonAnalysis({ file, settings, onBusy }: Props) {
               larger detector input size above (384 or 512 px). On our test clips that found small workers, but it also split some people into several tracks.
             </p>
           )}
+          {stage.kind === "done" && tracked.tracks.length > 0 && (() => {
+            const clip: ReviewClip = {
+              id: `multi:${file.name}:${file.size}:${file.lastModified}:${settings.maxDimension}:${settings.tracker}`,
+              name: file.name, durationS, source: "multi",
+              tracks: tracked.tracks.map((t) => {
+                const sc = scores[t.label];
+                return sc?.kind === "scored"
+                  ? { key: t.label, label: `Track ${t.label}`, scored: true, windows: sc.result.windows.length, aboveTrained: sc.result.windows_above_threshold }
+                  : { key: t.label, label: `Track ${t.label}`, scored: false, windows: 0, aboveTrained: 0 };
+              }),
+            };
+            return (
+              <div className="review-add">
+                <button type="button" disabled={inReview(clip.id)} onClick={() => onAddToReview(clip)}>
+                  {inReview(clip.id) ? "✓ In the shift review" : "Add to shift review"}
+                </button>
+                <span className="muted">For the Schedule tab. Keeps only each track’s summary, on this page; you choose the person there.</span>
+              </div>
+            );
+          })()}
           {tracked.tracks.length > 0 && (
             <div className="track-picker" role="group" aria-label="Choose a track">
               {tracked.tracks.map((t) => {

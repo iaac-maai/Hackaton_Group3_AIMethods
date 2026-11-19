@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { analyzeKeypoints, wakeModelServer, type KeypointResult, type ScoredWindow } from "./api";
 import { HistoryPanel, type HistoryState } from "./components/HistoryPanel";
 import { MultiPersonAnalysis } from "./components/MultiPersonAnalysis";
-import { SchedulePlanner, type AnalysisContext } from "./components/SchedulePlanner";
+import { SchedulePlanner } from "./components/SchedulePlanner";
 import { ScoreTimeline } from "./components/ScoreTimeline";
 import { panelId, tabId, Tabs } from "./components/Tabs";
 import { ThresholdControl } from "./components/ThresholdControl";
@@ -16,6 +16,7 @@ import { createDetector, EXTRACTOR, type Detector, type MultiSettings, type Trac
 import { assessQuality, type Quality } from "./pose/quality";
 import { extractVideo, type VideoExtraction } from "./pose/sampleVideo";
 import { minRecordSeconds } from "./recording";
+import type { ReviewClip } from "./review";
 import { clampThreshold, classify, isTrained, sliderRange } from "./threshold";
 
 // Video-first keypoint analysis. The video stays in this browser: MoveNet extracts one pose per
@@ -37,7 +38,7 @@ type SaveState =
 
 const WINDOW_S = WINDOW / FPS;
 const MIN_RECORD_S = minRecordSeconds(WINDOW_S);
-// Experimental multi-person defaults, chosen on the 13 validation clips (prototype_out/multipose_eval).
+// Multi-person defaults, chosen on the 13 validation clips (prototype_out/multipose_eval).
 const DEFAULT_MULTI: MultiSettings = { maxDimension: 256, tracker: "boundingBox" };
 const HISTORY_LIMIT = 20;
 const clock = (s: number) => `${Math.floor(s / 60)}:${(s % 60).toFixed(1).padStart(4, "0")}`;
@@ -68,6 +69,10 @@ export default function App() {
   const [multiSettings, setMultiSettings] = useState<MultiSettings>(DEFAULT_MULTI);
   const [multiFile, setMultiFile] = useState<File | null>(null);
   const [multiBusy, setMultiBusy] = useState(false);
+  // Shift review for the Schedule tab: movement summaries only, page memory only (never History).
+  const [reviewClips, setReviewClips] = useState<ReviewClip[]>([]);
+  const addToReview = (clip: ReviewClip) => setReviewClips((cs) => (cs.some((c) => c.id === clip.id) ? cs : [...cs, clip]));
+  const inReview = (id: string) => reviewClips.some((c) => c.id === id);
   const fileInput = useRef<HTMLInputElement>(null);
   const recordButton = useRef<HTMLButtonElement>(null);
 
@@ -91,7 +96,7 @@ export default function App() {
 
   async function run(f: File) {
     if (!detector) return;
-    if (multiMode) {   // experimental: separate analysis per tracked person, nothing saved to History
+    if (multiMode) {   // separate analysis per tracked person; nothing saved to History
       wakeModelServer();
       setMultiFile(f);
       return;
@@ -223,10 +228,14 @@ export default function App() {
   const trainedCount = viewResult?.windows.filter((w) => w.above_threshold).length ?? 0;
   const flagged = viewResult?.windows.filter((_, i) => cls.flagged[i]) ?? [];
   const jump = (w: ScoredWindow) => { if (canPlay) player.current?.playFrom(w.start_seconds); };
-  // Optional context for the planner: trained-threshold counts only, never the exploratory value.
-  const scheduleContext: AnalysisContext | null = viewResult
-    ? { flagged: trainedCount, total: viewResult.windows.length, durationS: view?.durationS ?? null, saved: restored != null }
-    : null;
+  // This result as a shift-review clip: trained-threshold counts only, never the exploratory value.
+  const reviewClip: ReviewClip | null = viewResult ? {
+    id: restored ? `saved:${restored.item.id}` : `single:${file?.name}:${file?.size}:${file?.lastModified}`,
+    name: restored ? `Saved analysis, ${new Date(restored.item.created_at).toLocaleString()}` : file?.name ?? "Video",
+    durationS: view?.durationS ?? null,
+    source: restored ? "saved" : "single",
+    tracks: [{ key: "single", label: "Person (single-person analysis)", scored: true, windows: viewResult.windows.length, aboveTrained: trainedCount }],
+  } : null;
   const activity = recording ? " · recording" : busy || multiBusy ? " · working" : "";
 
   return (
@@ -264,11 +273,16 @@ export default function App() {
       </section>
 
       <section className="mode-switch" aria-label="Analysis mode">
-        <label className="check">
-          <input type="checkbox" checked={multiMode} disabled={busy || multiBusy || recording}
-            onChange={(e) => setMultiMode(e.target.checked)} />
-          <span><span className="pill pill-exp">Experimental</span> Analyse several people separately</span>
-        </label>
+        <button type="button" role="switch" aria-checked={multiMode} className="switch" disabled={busy || multiBusy || recording}
+          onClick={() => setMultiMode((m) => !m)}>
+          <span className="switch-track" aria-hidden="true"><span className="switch-thumb" /></span>
+          <span className="switch-label">Analyze multiple people</span>
+          <span className="switch-state" aria-hidden="true">{multiMode ? "On" : "Off"}</span>
+        </button>
+        <p className="muted switch-note">
+          {multiMode ? "Each person gets a label (Track A, B, C …) that applies only within the current video. " : "When on, each person is analysed separately. "}
+          Tracking can miss or switch people, especially when they’re small, partly hidden or close together.
+        </p>
         {multiMode && (
           <div className="multi-settings">
             <label className="field narrow"><span>Detector input size</span>
@@ -298,7 +312,8 @@ export default function App() {
           onCancel={() => { setRecording(false); requestAnimationFrame(() => recordButton.current?.focus()); }} />
       )}
 
-      {multiMode && multiFile && <MultiPersonAnalysis file={multiFile} settings={multiSettings} onBusy={setMultiBusy} />}
+      {multiMode && multiFile && <MultiPersonAnalysis file={multiFile} settings={multiSettings} onBusy={setMultiBusy}
+        onAddToReview={addToReview} inReview={inReview} />}
 
       <div hidden={multiMode}>
       {stage.kind === "extracting" && (
@@ -343,6 +358,14 @@ export default function App() {
                   {result ? "Back to current analysis" : "Close saved analysis"}
                 </button>
               </div>
+            </div>
+          )}
+          {reviewClip && (
+            <div className="review-add">
+              <button type="button" disabled={inReview(reviewClip.id)} onClick={() => addToReview(reviewClip)}>
+                {inReview(reviewClip.id) ? "✓ In the shift review" : "Add to shift review"}
+              </button>
+              <span className="muted">For the Schedule tab. Keeps only this summary, on this page.</span>
             </div>
           )}
           {!restored && save.kind === "saving" && <p className="save-status muted" role="status">Saving to history…</p>}
@@ -433,7 +456,7 @@ export default function App() {
       </div>
 
       <div role="tabpanel" id={panelId("schedule")} aria-labelledby={tabId("schedule")} hidden={tab !== "schedule"}>
-        <SchedulePlanner analysis={scheduleContext} />
+        <SchedulePlanner reviewClips={reviewClips} onRemoveClip={(id) => setReviewClips((cs) => cs.filter((c) => c.id !== id))} />
       </div>
     </main>
   );
