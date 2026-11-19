@@ -7,12 +7,13 @@
  * - Stores analysis summaries in Cloudflare D1
  * - Handles Better Auth signup, login, and sessions
  * - Requires authentication for analysis and history APIs
- * - Scopes saved history to the authenticated user
+ * - Scopes saved history (and the read-only analytics summary) to the authenticated user
  *
  * Video is processed locally in the browser.
  */
 
 import { handleHistory, type HistoryEnv } from "./history.ts";
+import { handleAnalytics } from "./analytics.ts";
 import { createAuth } from "./auth.ts";
 import type { D1Database } from "@cloudflare/workers-types";
 
@@ -126,8 +127,12 @@ export default {
     const isAnalysisRoute =
       pathname === "/api/analyze/keypoints";
 
+    // Read-only summary of the user's own History records for the Analytics tab.
+    const isAnalyticsRoute =
+      pathname === "/api/analytics";
+
     const protectedRoute =
-      isHistoryRoute || isAnalysisRoute;
+      isHistoryRoute || isAnalysisRoute || isAnalyticsRoute;
 
     // This value comes ONLY from the server-verified session.
     // Never read it from a request header or request body.
@@ -237,14 +242,25 @@ export default {
       }
     }
 
-    // 7. Unknown API routes
+    // 7. Analytics: summaries of the signed-in user's own History records
+    if (isAnalyticsRoute) {
+      if (!authenticatedUserId) {
+        return json(401, {
+          detail: "Please log in to use Motion Atlas.",
+        });
+      }
+
+      return handleAnalytics(request, env, authenticatedUserId);
+    }
+
+    // 8. Unknown API routes
     if (pathname.startsWith("/api/")) {
       return json(404, {
         detail: "Unknown API route.",
       });
     }
 
-    // 8. Serve the React application
+    // 9. Serve the React application
     return env.ASSETS.fetch(request);
   },
 };
