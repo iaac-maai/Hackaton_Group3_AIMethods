@@ -12,7 +12,7 @@ import { createServer } from "node:http";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { extname, join, resolve } from "node:path";
 import { chromium } from "playwright-core";
-import { buildTracks, segmentFrames, trackSummary } from "../src/pose/tracks.ts";
+import { buildTracks, segmentFrames, segmentsToScore, trackSummary } from "../src/pose/tracks.ts";
 
 const args = Object.fromEntries(process.argv.slice(2).reduce((acc, a, i, all) => {
   if (a.startsWith("--")) acc.push([a.slice(2), all[i + 1]]);
@@ -75,7 +75,7 @@ if (PHASE === "tracks" || PHASE === "all") {
             label: t.label, rawIds: t.rawIds, present: t.present, first: t.first, last: t.last, scoreable: t.scoreable,
             issues: t.issues, ...trackSummary(t),
             segments: t.segments.map((s) => ({
-              ...s, frames: t.scoreable && s.scoreableWindows > 0 ? segmentFrames(t, s, empty) : null,
+              ...s, frames: segmentsToScore(t).includes(s) ? segmentFrames(t, s, empty) : null,   // never a withheld segment
             })),
           })),
         };

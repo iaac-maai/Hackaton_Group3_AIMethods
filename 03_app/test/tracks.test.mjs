@@ -1,8 +1,10 @@
 // EXPERIMENTAL multi-person track post-processing: labels, segments, rejoin, jumps, duplicates,
 // and the guarantee that a scored segment only contains one tracker ID's poses.
+// Identity cases (brief occlusion, reappearance, duplicates, crossing, user edits) are further down;
+// the recorded two-person regression clip is in tracks.regression.test.mjs.
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { buildTracks, describeIssues, segmentFrames, trackLabel, trackSummary } from "../src/pose/tracks.ts";
+import { buildTracks, describeIssues, segmentFrames, trackLabel, trackSummary, trackTimes } from "../src/pose/tracks.ts";
 
 const empty = () => Array.from({ length: 17 }, () => [0, 0, 0]);
 /** Upright skeleton with hips at (cx, cy) and a 100 px torso; conf p for all points. */
@@ -12,12 +14,14 @@ function body(cx, cy, p = 0.9) {
   f[11] = [cx - 15, cy, p]; f[12] = [cx + 15, cy, p];
   return f;
 }
-/** T frames; people: [{id, from, to, x(t)}] */
+/** T frames; people: [{id, from, to, x(t), y?(t), missing?, conf?(t), app?}] (app: clothing colour, 6 numbers) */
 function clip(T, people) {
   return Array.from({ length: T }, (_, t) => people
     .filter((p) => t >= p.from && t < p.to && !(p.missing ?? []).includes(t))
-    .map((p) => ({ id: p.id, score: 0.8, kp: body(p.x(t), 500, p.conf?.(t) ?? 0.9) })));
+    .map((p) => ({ id: p.id, score: 0.8, kp: body(p.x(t), p.y?.(t) ?? 500, p.conf?.(t) ?? 0.9), ...(p.app ? { app: p.app } : {}) })));
 }
+const range = (a, b) => Array.from({ length: b - a }, (_, i) => a + i);
+const labelOf = (r, rawId) => r.tracks.find((t) => t.rawIds.includes(rawId))?.label;
 
 describe("labels and segments", () => {
   test("labels by first appearance; one segment per continuous track", () => {
@@ -83,12 +87,16 @@ describe("rejoin, jumps, duplicates", () => {
     assert.deepEqual(t.segments.map((s) => [s.start, s.end]), [[0, 60], [60, 120]]);
   });
 
-  test("a second detection on top of the same person is marked duplicate and not scored", () => {
+  test("a second detection on top of the same person is absorbed before labelling", () => {
     const r = buildTracks(clip(100, [{ id: 1, from: 0, to: 100, x: () => 300 }, { id: 2, from: 20, to: 80, x: () => 305 }]));
-    const b = r.tracks.find((t) => t.rawIds.includes(2));
-    assert.ok(b.issues.some((i) => i.kind === "duplicate" && i.of === "A"));
-    assert.equal(b.scoreable, false);
-    assert.equal(r.tracks.find((t) => t.rawIds.includes(1)).scoreable, true);
+    assert.equal(r.tracks.length, 1);
+    assert.deepEqual(r.tracks[0].rawIds, [1]);
+    assert.deepEqual(r.tracks[0].absorbed, [2]);
+    assert.equal(r.maxPeople, 1);
+    assert.equal(r.maxDetections, 2);
+    assert.ok(r.tracks[0].scoreable);
+    // the scored frames still come only from tracker 1
+    assert.ok(r.tracks[0].rawIdAt.every((id) => id === 1));
   });
 });
 
@@ -117,14 +125,18 @@ describe("warnings", () => {
   test("coverage, dropouts, rejoins and duplicates are described with times", () => {
     const poses = clip(200, [
       { id: 1, from: 0, to: 60, x: (t) => 300 + t }, { id: 2, from: 70, to: 150, x: (t) => 300 + t },
-      { id: 5, from: 20, to: 80, x: () => 330 },
+      { id: 5, from: 20, to: 80, x: (t) => 325 + t },   // walks right next to A
     ]);
     const r = buildTracks(poses);
     const a = describeIssues(r.tracks.find((t) => t.label === "A"), 200);
     assert.ok(a.some((w) => /Detected in 70% of the clip \(0:00.0–0:06.0\)/.test(w)), a.join(" | "));
-    assert.ok(a.some((w) => /split this person at 0:02.8/.test(w)));
+    // The 0.4 s gap is brief, but tracker 5 walks right next to that spot during it (and is flagged as a
+    // possible duplicate), so the join isn't confident: identity unconfirmed, results not combined.
+    assert.ok(a.some((w) => /Identity unconfirmed at 0:02.8: .*someone else was detected close by during the gap/.test(w)), a.join(" | "));
+    // tracker 5 sits next to A (same keypoints, boxes only partly overlapping): flagged, not silently dropped
     const dup = r.tracks.find((t) => t.rawIds.includes(5));
     assert.ok(describeIssues(dup, 200).some((w) => /same person detected twice/.test(w)));
+    assert.equal(dup.identity, "uncertain");
   });
 });
 

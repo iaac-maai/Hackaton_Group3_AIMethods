@@ -1,5 +1,6 @@
 // Draft work-schedule planner. Pure functions only: the suggestions follow the rules and values the
-// user entered and nothing else. Analysis scores are never used here. Nothing is saved or sent.
+// user entered (shift, tasks, break rules, and self-reported exertion/tiredness from the shift
+// review) and nothing else. Movement-deviation scores are never used here. Nothing is saved or sent.
 
 export type BlockKind = "task" | "break" | "meal" | "open";
 
@@ -9,13 +10,22 @@ export interface Block {
   label: string;
   minutes: number;
   demanding?: boolean;   // user-marked "physically demanding" task
+  reason?: string;       // "Why this suggestion", shown with the block
 }
+
+/** Self-reported exertion for a task (the worker's own rating; never derived from video). */
+export type Exertion = "very-light" | "light" | "moderate" | "hard" | "very-hard";
+export const EXERTION_LABEL: Record<Exertion, string> = {
+  "very-light": "Very light", light: "Light", moderate: "Moderate", hard: "Hard", "very-hard": "Very hard",
+};
+export const isHard = (e?: Exertion) => e === "hard" || e === "very-hard";
 
 export interface TaskInput {
   id: string;
   name: string;
   minutes: number;
   demanding: boolean;
+  exertion?: Exertion;     // from the shift review, when reported
 }
 
 export interface PlannerSettings {
@@ -25,7 +35,29 @@ export interface PlannerSettings {
   workStretchMin: number;  // longest stretch of work before a short break
   mealBreakMin: number;    // 0 = no meal break
   alternate: boolean;      // alternate demanding and lighter tasks where possible
+  // Optional, user-set rules applied to shift-review self-reports (undefined = rule off):
+  hardStretchMin?: number;   // longest continuous stretch on a task rated Hard / Very hard
+  tiredFromMin?: number;     // time of day from which tiredness was reported ...
+  tiredStretchMin?: number;  // ... and the work interval between breaks around and after it
 }
+
+export type StretchRule = "general" | "hard" | "tired";
+
+/** Plain-language name of the user-selected rule that limits a stretch (used in "Why" texts). */
+export function ruleText(rule: StretchRule, s: PlannerSettings, taskName = ""): string {
+  if (rule === "hard") {
+    return `${taskName ? `${taskName} is rated Hard or Very hard in the shift review; ` : ""}your rule for tasks rated Hard or Very hard: at most ${s.hardStretchMin} min of continuous work`;
+  }
+  if (rule === "tired") {
+    return `your rule after reported tiredness: a break every ${s.tiredStretchMin} min of work around and after ${formatTime(s.tiredFromMin!)}`;
+  }
+  return `your break rule: a break after every ${s.workStretchMin} min of work`;
+}
+
+const ruleShort = (rule: StretchRule, s: PlannerSettings) =>
+  rule === "hard" ? `your Hard-task rule (at most ${s.hardStretchMin} min)`
+    : rule === "tired" ? `your tiredness rule (every ${s.tiredStretchMin} min from ${formatTime(s.tiredFromMin!)})`
+    : `your break rule (every ${s.workStretchMin} min)`;
 
 export interface DayPlan {
   day: string;
@@ -90,51 +122,110 @@ export function orderTasks(tasks: TaskInput[], alternate: boolean): TaskInput[] 
 
 /**
  * One day's draft. Rules (all from the user's inputs):
- *  1. Tasks in order; a task longer than the work stretch is split around breaks.
- *  2. A short break after each work stretch.
+ *  1. Tasks in order (alternating demanding and lighter tasks if chosen); a task longer than the
+ *     allowed stretch is split around breaks.
+ *  2. A short break after each work stretch. The stretch is the user's break rule, shortened by the
+ *     user's optional rules for tasks rated Hard and for time around/after reported tiredness.
  *  3. One meal break at the first break due around the middle of the shift.
  *  4. Time left at the end is "Open time"; task time that doesn't fit is listed as not scheduled.
+ * Every block carries a short reason naming the user-selected rule behind it.
  */
 export function generateDay(day: string, s: PlannerSettings, tasks: TaskInput[]): DayPlan {
   const blocks: Block[] = [];
   const unscheduled: DayPlan["unscheduled"] = [];
   const mid = s.startMin + (s.endMin - s.startMin) / 2;
   let cursor = s.startMin, sinceBreak = 0, mealPlaced = s.mealBreakMin <= 0;
+  let stretchWhy = "";
+  let stretchRule: StretchRule = "general";
+  let lastBreakCause = "";
 
-  const placeBreak = () => {
+  const limitFor = (t: TaskInput): { limit: number; why: string; rule: StretchRule } => {
+    let limit = s.workStretchMin, rule: StretchRule = "general";
+    if (isHard(t.exertion) && s.hardStretchMin && s.hardStretchMin < limit) {
+      limit = s.hardStretchMin;
+      rule = "hard";
+    }
+    // A stretch that would run past the reported tiredness time is capped at the shorter stretch
+    // (or ends at that time, if later).
+    const stretchStart = cursor - sinceBreak;
+    if (s.tiredFromMin != null && s.tiredStretchMin && s.tiredStretchMin < limit && stretchStart + limit > s.tiredFromMin) {
+      const capped = Math.max(s.tiredStretchMin, s.tiredFromMin - stretchStart);
+      if (capped < limit) {
+        limit = capped;
+        rule = "tired";
+        if (capped > s.tiredStretchMin) {   // the stretch is ended at the reported time rather than after N min
+          return { limit, rule, why: `your rule after reported tiredness: a break at ${formatTime(s.tiredFromMin)}, when tiredness was reported, then every ${s.tiredStretchMin} min of work` };
+        }
+      }
+    }
+    return { limit, why: ruleText(rule, s, rule === "hard" ? t.name.trim() : ""), rule };
+  };
+
+  const placeBreak = (cause: string) => {
+    lastBreakCause = cause;
     const meal = !mealPlaced && cursor >= mid - s.workStretchMin / 2;
     const want = meal ? s.mealBreakMin : s.shortBreakMin;
     const len = Math.min(want, s.endMin - cursor);
     if (len > 0) {
-      blocks.push({ id: newId(), kind: meal ? "meal" : "break", label: meal ? "Meal break" : "Break", minutes: len });
+      blocks.push({
+        id: newId(), kind: meal ? "meal" : "break", label: meal ? "Meal break" : "Break", minutes: len,
+        reason: meal
+          ? `Meal break around the middle of the shift (your meal-break setting), after ${sinceBreak} min of work.`
+          : `After ${sinceBreak} min of work: ${stretchWhy}.`,
+      });
       cursor += len;
     }
     if (meal) mealPlaced = true;
     sinceBreak = 0;
   };
 
+  const ordered = orderTasks(tasks, s.alternate);
   const segments = new Map<string, Block[]>();
-  for (const t of orderTasks(tasks, s.alternate)) {
+  const partCause = new Map<string, string>();   // continuation block id -> rule that caused the split
+  ordered.forEach((t, idx) => {
+    const prev = ordered[idx - 1];
+    const parts: string[] = [];
+    if (s.alternate && prev && prev.demanding !== t.demanding) {
+      parts.push(t.demanding ? `Demanding task placed after a lighter one (${prev.name.trim()}) to alternate.`
+        : `Lighter task placed after a demanding one (${prev.name.trim()}) to alternate.`);
+    } else parts.push(idx === 0 ? "First task of the shift." : "In the order you entered.");
+    if (t.exertion) parts.push(`Rated ${EXERTION_LABEL[t.exertion]} in the shift review.`);
+    const taskReason = parts.join(" ");
     let remaining = t.minutes;
     while (remaining > 0) {
-      const left = s.workStretchMin - sinceBreak;
-      if (sinceBreak > 0 && (left <= 0 || (left < 10 && remaining >= 10))) placeBreak();
-      else if (!mealPlaced && sinceBreak > 0 && cursor >= mid + s.workStretchMin / 2) placeBreak();
+      let { limit, why, rule } = limitFor(t);
+      const left = limit - sinceBreak;
+      if (sinceBreak > 0 && (left <= 0 || (left < 10 && remaining >= 10))) placeBreak(ruleShort(stretchRule, s));
+      else if (!mealPlaced && sinceBreak > 0 && cursor >= mid + s.workStretchMin / 2) placeBreak("the mid-shift meal break");
+      ({ limit, why, rule } = limitFor(t));
       const room = s.endMin - cursor;
       if (room <= 0) break;
-      const chunk = Math.min(remaining, s.workStretchMin - sinceBreak, room);
-      const b: Block = { id: newId(), kind: "task", label: t.name.trim(), minutes: chunk, demanding: t.demanding };
+      const chunk = Math.min(remaining, limit - sinceBreak, room);
+      const b: Block = { id: newId(), kind: "task", label: t.name.trim(), minutes: chunk, demanding: t.demanding, reason: taskReason };
+      if (remaining < t.minutes) partCause.set(b.id, lastBreakCause);
       blocks.push(b);
       segments.set(t.id, [...(segments.get(t.id) ?? []), b]);
+      stretchWhy = why;
+      stretchRule = rule;
       cursor += chunk; sinceBreak += chunk; remaining -= chunk;
     }
     if (remaining > 0) unscheduled.push({ name: t.name.trim(), minutes: remaining });
-  }
-  for (const parts of segments.values()) {
-    if (parts.length > 1) parts.forEach((b, i) => { b.label = `${b.label} (part ${i + 1} of ${parts.length})`; });
+  });
+  for (const [taskId, parts] of segments) {
+    if (parts.length > 1) {
+      const t = ordered.find((x) => x.id === taskId)!;
+      const rated = t.exertion ? ` Rated ${EXERTION_LABEL[t.exertion]} in the shift review.` : "";
+      const causes = [...new Set(parts.slice(1).map((b) => partCause.get(b.id)).filter(Boolean))];
+      parts.forEach((b, i) => {
+        b.label = `${b.label} (part ${i + 1} of ${parts.length})`;
+        b.reason = i === 0
+          ? `${b.reason} Split into ${parts.length} parts by ${causes.join(" and ")}.`
+          : `Continues ${t.name.trim()} after the break (split by ${partCause.get(b.id)}).${rated}`;
+      });
+    }
   }
   while (blocks.length && blocks[blocks.length - 1].kind !== "task") cursor -= blocks.pop()!.minutes;
-  if (cursor < s.endMin) blocks.push({ id: newId(), kind: "open", label: "Open time", minutes: s.endMin - cursor });
+  if (cursor < s.endMin) blocks.push({ id: newId(), kind: "open", label: "Open time", minutes: s.endMin - cursor, reason: "Shift time left after all tasks." });
   return { day, blocks, unscheduled };
 }
 
@@ -161,7 +252,7 @@ export function dayTotals(blocks: Block[], s: Pick<PlannerSettings, "startMin" |
 
 // ---- editing (immutable) ----
 export function updateBlock(blocks: Block[], id: string, patch: Partial<Omit<Block, "id">>): Block[] {
-  return blocks.map((b) => (b.id === id ? { ...b, ...patch } : b));
+  return blocks.map((b) => (b.id === id ? { ...b, ...patch, reason: "Changed by you." } : b));
 }
 export function removeBlock(blocks: Block[], id: string): Block[] {
   return blocks.filter((b) => b.id !== id);
@@ -170,21 +261,27 @@ export function moveBlock(blocks: Block[], id: string, delta: -1 | 1): Block[] {
   const i = blocks.findIndex((b) => b.id === id), j = i + delta;
   if (i < 0 || j < 0 || j >= blocks.length) return blocks;
   const out = blocks.slice();
-  [out[i], out[j]] = [out[j], out[i]];
+  [out[i], out[j]] = [{ ...out[j] }, { ...out[i], reason: "Moved by you." }];
   return out;
 }
 export function addBlock(blocks: Block[], kind: BlockKind, minutes: number): Block[] {
   const label = kind === "task" ? "New task" : kind === "meal" ? "Meal break" : kind === "open" ? "Open time" : "Break";
-  return [...blocks, { id: newId(), kind, label, minutes }];
+  return [...blocks, { id: newId(), kind, label, minutes, reason: "Added by you." }];
 }
 
 /** Plain-text copy of the draft, for the user to paste wherever they choose. */
-export function planToText(plans: DayPlan[], s: PlannerSettings): string {
-  const lines = ["Draft work schedule (Motion Atlas planner — a draft, not a final or approved schedule)", ""];
+export function planToText(plans: DayPlan[], s: PlannerSettings, basis?: { title: string; notes: string[] }): string {
+  const lines = [
+    "Draft work schedule (Motion Atlas planner): a draft, not a final or approved schedule.",
+    "For the worker and supervisor to review. Not medical advice, a diagnosis, an injury-risk assessment or a safety certification.",
+    "",
+  ];
+  if (basis) { lines.push(basis.title); for (const n of basis.notes) lines.push(`- ${n}`); lines.push(""); }
   for (const p of plans) {
     lines.push(`${DAY_NAMES[p.day] ?? p.day} · shift ${formatTime(s.startMin)}–${formatTime(s.endMin)}`);
     for (const b of withTimes(p.blocks, s.startMin)) {
       lines.push(`  ${formatTime(b.start)}–${formatTime(b.end)}  ${b.label}${b.kind === "task" && b.demanding ? " (demanding)" : ""}`);
+      if (b.reason) lines.push(`      Why: ${b.reason}`);
     }
     for (const u of p.unscheduled) lines.push(`  Not scheduled: ${u.name}, ${formatDuration(u.minutes)}`);
     lines.push("");

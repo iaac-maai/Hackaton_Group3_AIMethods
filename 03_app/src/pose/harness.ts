@@ -2,7 +2,7 @@
 // frames and (b) the original video, so detector and sampling can be checked separately.
 import { framesToCsv, type Frame } from "./coco";
 import { createDetector, createMultiDetector, detectFrame, detectMulti, EXTRACTOR, type Detector, type MultiSettings } from "./movenet";
-import { extractVideo } from "./sampleVideo";
+import { extractVideo, extractVideoMulti, withAppearance } from "./sampleVideo";
 
 let detectorPromise: Promise<{ detector: Detector; backend: string }> | null = null;
 const getDetector = () => (detectorPromise ??= createDetector());
@@ -60,8 +60,11 @@ async function extractImagesMulti(base: string, ticks: number, settings: MultiSe
     for (let k = 0; k < ticks; k++) {
       const blob = await (await fetch(`${base}/${String(k).padStart(6, "0")}.jpg`)).blob();
       const bitmap = await createImageBitmap(blob);
-      poses.push(await detectMulti(detector, bitmap, (k * 1000) / 25));
+      const canvas = document.createElement("canvas");
+      canvas.width = bitmap.width; canvas.height = bitmap.height;
+      canvas.getContext("2d", { willReadFrequently: true })!.drawImage(bitmap, 0, 0);
       bitmap.close();
+      poses.push(withAppearance(canvas, await detectMulti(detector, canvas, (k * 1000) / 25)));
     }
   } finally {
     detector.dispose();
@@ -69,7 +72,21 @@ async function extractImagesMulti(base: string, ticks: number, settings: MultiSe
   return { poses, elapsedMs: performance.now() - t0 };
 }
 
+/** EXPERIMENTAL: the real multi-person app path (video sampled in the browser), for regression fixtures. */
+async function extractVideoUrlMulti(url: string, settings: MultiSettings) {
+  const detector = await createMultiDetector(settings);
+  const blob = await (await fetch(url)).blob();
+  const objectUrl = URL.createObjectURL(blob);
+  try {
+    const r = await extractVideoMulti(objectUrl, detector);
+    return { poses: r.poses, width: r.width, height: r.height, durationS: r.durationS, elapsedMs: r.elapsedMs };
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+    detector.dispose();
+  }
+}
+
 declare global {
   interface Window { __motionAtlas?: unknown }
 }
-window.__motionAtlas = { info, extractImages, extractImagesMulti, extractVideoUrl };
+window.__motionAtlas = { info, extractImages, extractImagesMulti, extractVideoUrl, extractVideoUrlMulti };
