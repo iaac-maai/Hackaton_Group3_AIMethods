@@ -1,6 +1,6 @@
 import type { HistoryItem } from "../history";
 
-// Recent saved analyses for this browser. Selecting a row restores its summary and timeline.
+// Recent saved analyses for the logged-in account. Selecting a row restores its summary and timeline.
 
 export type HistoryState =
   | { kind: "loading" }
@@ -24,8 +24,8 @@ export function HistoryPanel({ state, selectedId, busyId, actionError, onSelect,
     <section className="history" id="history" aria-labelledby="history-title">
       <h2 id="history-title">History</h2>
       <p className="muted">
-        Recent analyses saved from this browser (summaries and window scores only, no video or keypoints). Saved records are
-        tied to a random ID stored in this browser; this is not a login, so don’t analyse confidential footage.
+        Recent analyses saved to your account (summaries and window scores only, no video or keypoints). Only you can see
+        them, on any device where you’re logged in. This is a prototype, so don’t analyse confidential footage.
       </p>
       {state.kind === "loading" && <p role="status">Loading saved analyses…</p>}
       {state.kind === "error" && (
@@ -35,7 +35,7 @@ export function HistoryPanel({ state, selectedId, busyId, actionError, onSelect,
         </div>
       )}
       {state.kind === "ready" && state.items.length === 0 && (
-        <p className="muted">No saved analyses yet. Each successful analysis is saved here automatically.</p>
+        <p className="muted">No saved analyses yet. Each successful single-person analysis is saved here automatically.</p>
       )}
       {actionError && <p className="error" role="alert">{actionError}</p>}
       {state.kind === "ready" && state.items.length > 0 && (

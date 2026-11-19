@@ -48,7 +48,7 @@ export function AuthScreen({ onBack }: { onBack?: () => void } = {}) {
       )}
       <section className="auth-card">
         <h1><img className="auth-logo" src={logo} alt="Motion Atlas" width={1281} height={303} /></h1>
-        <p>Movement safety analysis</p>
+        <p>Movement deviation analysis</p>
 
         <h2>{mode === "login" ? "Log in" : "Create account"}</h2>
 
