@@ -702,5 +702,33 @@ main.landing {
   .auth-back { animation: ma-rise 0.8s var(--ease-out) both; }
 }
 
+/* ---------- Analytics tab ---------- */
+.analytics { margin-top: 16px; }
+.analytics h3 { margin: 0 0 4px; font-size: 1rem; color: var(--ink); }
+.analytics-intro { max-width: 75ch; }
+.analytics-disclaimer { background: var(--warn-bg); color: var(--warn-ink); border-radius: 12px; padding: 10px 14px; max-width: 75ch; }
+.analytics-summary { font-size: 1.05rem; color: var(--ink); max-width: 75ch; }
+.analytics-limit { max-width: 75ch; font-size: 0.9rem; }
+.analytics-limit.warn { color: var(--warn-ink); }
+.analytics-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin: 12px 0 16px; }
+.analytics-tiles .tile { margin: 0; }
+.analytics-tiles dt { color: var(--ink-2); text-transform: uppercase; letter-spacing: 0.04em; font-size: 0.72rem; font-weight: 600; }
+.analytics-tiles dd { margin: 0; font-size: 1.35rem; font-weight: 600; font-variant-numeric: tabular-nums; }
+.analytics-tiles dd .muted { font-size: 1rem; font-weight: 500; }
+.analytics-chart { margin: 16px 0; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 12px; }
+.analytics-chart figcaption p { margin: 0 0 8px; font-size: 0.85rem; }
+.analytics-svg { width: 100%; min-width: 0; }
+.analytics-svg svg { width: 100%; height: auto; display: block; }
+.analytics-svg .grid { stroke: var(--grid); stroke-width: 1; }
+.analytics-svg .axes text { fill: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.analytics-svg .bar { fill: var(--bar); }
+.analytics-svg g:hover .bar { opacity: 0.8; }
+.analytics-svg .line { fill: none; stroke: var(--flag); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.analytics-svg .dot { fill: var(--flag); stroke: var(--surface); stroke-width: 2; }
+.analytics-table, .analytics-types { margin: 12px 0; }
+.analytics-table > div, .analytics-table table, .analytics-types table { width: 100%; }
+.analytics table { border-collapse: collapse; font-variant-numeric: tabular-nums; font-size: 0.9rem; }
+.analytics th, .analytics td { text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--line); }
+.analytics-table { overflow-x: auto; }
 /* Model tab: 3D evaluation graphs (public/graphs) */
 .model-eval iframe { display: block; width: 100%; border: 0; background: transparent; }

@@ -5,6 +5,7 @@ import { Landing } from "./Landing";
 import logo from "./assets/motion-atlas-logo-compact.png";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { analyzeKeypoints, wakeModelServer, type KeypointResult, type ScoredWindow } from "./api";
+import { AnalyticsPanel } from "./components/AnalyticsPanel";
 import { HistoryPanel, type HistoryState } from "./components/HistoryPanel";
 import { MultiPersonAnalysis } from "./components/MultiPersonAnalysis";
 import { SchedulePlanner } from "./components/SchedulePlanner";
@@ -70,10 +71,12 @@ function AppContent() {
   const resultSection = useRef<HTMLElement>(null);
   const runSeq = useRef(0);
   const [recording, setRecording] = useState(false);
-  const [tab, setTab] = useState<"analysis" | "schedule" | "model">("analysis");
-  const [modelSeen, setModelSeen] = useState(false);
-  useEffect(() => { if (tab === "model") setModelSeen(true); }, [tab]);
+    const [tab, setTab] = useState<"analysis" | "schedule" | "analytics" | "model">("analysis");
+  // Bumped whenever History changes, so the Analytics tab reloads the next time it's shown.
+  const [historyVersion, setHistoryVersion] = useState(0);
   const [multiMode, setMultiMode] = useState(false);
+    const [modelSeen, setModelSeen] = useState(false);
+  useEffect(() => { if (tab === "model") setModelSeen(true); }, [tab]);
   const [multiSettings, setMultiSettings] = useState<MultiSettings>(DEFAULT_MULTI);
   const [multiFile, setMultiFile] = useState<File | null>(null);
   const [multiBusy, setMultiBusy] = useState(false);
@@ -159,6 +162,7 @@ function AppContent() {
     setSave({ kind: "saving" });
     const outcome = await persistAnalysis(r, durationS, WINDOW_S);
     if (outcome.saved) {
+      setHistoryVersion((v) => v + 1);
       setHistory((h) => (h.kind === "ready"
         ? { kind: "ready", items: [outcome.item, ...h.items.filter((i) => i.id !== outcome.item.id)].slice(0, HISTORY_LIMIT) }
         : h));
@@ -169,6 +173,7 @@ function AppContent() {
   }
 
   function dropFromHistory(id: string) {
+    setHistoryVersion((v) => v + 1);
     setHistory((h) => (h.kind === "ready" ? { kind: "ready", items: h.items.filter((i) => i.id !== id) } : h));
     setRestored((r) => (r?.item.id === id ? null : r));
     setSave((s) => (s.kind === "saved" && s.id === id ? { kind: "idle" } : s));
@@ -281,10 +286,10 @@ function AppContent() {
             ? "Video movement analysis. Your video is processed in this browser and is never uploaded; only body keypoints are sent for scoring."
             : tab === "schedule"
               ? "Draft a shift plan with regular breaks. It stays on this page and isn’t saved or sent anywhere."
-              : "How the movement model was evaluated: drag any 3D graph to orbit it."}
+                            : tab === "analytics" ? "Summaries and trends from your own saved History. Movement deviations only, not fatigue, workload, injury risk or safety." : "How the movement model was evaluated: drag any 3D graph to orbit it."}
         </p>
-        <Tabs label="Motion Atlas sections" selected={tab} onSelect={(id) => setTab(id as "analysis" | "schedule" | "model")}
-          tabs={[{ id: "analysis", label: <>Analysis{activity && <span className="tab-activity">{activity}</span>}</> }, { id: "schedule", label: "Schedule" }, { id: "model", label: "Model" }]} />
+                <Tabs label="Motion Atlas sections" selected={tab} onSelect={(id) => setTab(id as "analysis" | "schedule" | "analytics" | "model")}
+                    tabs={[{ id: "analysis", label: <>Analysis{activity && <span className="tab-activity">{activity}</span>}</> }, { id: "schedule", label: "Schedule" }, { id: "analytics", label: "Analytics" }, { id: "model", label: "Model" }]} />
       </header>
 
       <div role="tabpanel" id={panelId("analysis")} aria-labelledby={tabId("analysis")} hidden={tab !== "analysis"}>
@@ -491,6 +496,9 @@ function AppContent() {
         <SchedulePlanner reviewClips={reviewClips} onRemoveClip={(id) => setReviewClips((cs) => cs.filter((c) => c.id !== id))} />
       </div>
 
+      <div role="tabpanel" id={panelId("analytics")} aria-labelledby={tabId("analytics")} hidden={tab !== "analytics"}>
+        <AnalyticsPanel active={tab === "analytics"} version={historyVersion} />
+              </div>
       <div role="tabpanel" id={panelId("model")} aria-labelledby={tabId("model")} hidden={tab !== "model"}>
         {modelSeen && <ModelEvaluation />}
       </div>
