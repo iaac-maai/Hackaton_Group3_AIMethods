@@ -1,77 +1,250 @@
-// Motion Atlas Worker: serves the React app and forwards keypoints to the existing Render model API.
-// It never receives video. Analysis summaries (never video or raw keypoints) are kept in D1; see
-// worker/history.ts. History is isolated from analysis: if D1 fails, analysis still works.
+
+/**
+ * Motion Atlas Cloudflare Worker
+ *
+ * - Serves the React frontend
+ * - Forwards keypoints to the Render ML API
+ * - Stores analysis summaries in Cloudflare D1
+ * - Handles Better Auth signup, login, and sessions
+ * - Requires authentication for analysis and history APIs
+ * - Scopes saved history to the authenticated user
+ *
+ * Video is processed locally in the browser.
+ */
 
 import { handleHistory, type HistoryEnv } from "./history.ts";
+import { createAuth } from "./auth.ts";
+import type { D1Database } from "@cloudflare/workers-types";
 
-export interface Env extends HistoryEnv {
-  ASSETS: Fetcher;
-  /** Base URL of the Render service, e.g. https://<service>.onrender.com (no trailing slash needed). */
-  RENDER_API_URL: string;
+interface AssetsBinding {
+  fetch(request: Request): Promise<Response>;
 }
 
-const MAX_KEYPOINT_BYTES = 8 * 1024 * 1024;   // ~13 min of 25 fps keypoints; video never comes here
-const RENDER_TIMEOUT_MS = 150_000;            // Render free tier cold start + first model download
+export interface Env extends HistoryEnv {
+  ASSETS: AssetsBinding;
+  RENDER_API_URL: string;
+  BETTER_AUTH_SECRET: string;
+  DB: D1Database;
+}
 
-const json = (status: number, body: unknown) =>
-  new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+const MAX_KEYPOINT_BYTES = 8 * 1024 * 1024;
+const RENDER_TIMEOUT_MS = 150_000;
 
-async function forward(env: Env, path: string, init: RequestInit): Promise<Response> {
-  const base = (env.RENDER_API_URL ?? "").trim().replace(/\/+$/, "");
-  if (!base) return json(503, { detail: "RENDER_API_URL is not configured for this Worker." });
+const json = (status: number, body: unknown): Response =>
+  new Response(JSON.stringify(body), {
+    status,
+    headers: {
+      "content-type": "application/json",
+      "cache-control": "no-store",
+    },
+  });
+
+async function forward(
+  env: Env,
+  path: string,
+  init: RequestInit
+): Promise<Response> {
+  const base = (env.RENDER_API_URL ?? "")
+    .trim()
+    .replace(/\/+$/, "");
+
+  if (!base) {
+    return json(503, {
+      detail: "RENDER_API_URL is not configured for this Worker.",
+    });
+  }
+
   let upstream: Response;
+
   try {
-    upstream = await fetch(base + path, { ...init, signal: AbortSignal.timeout(RENDER_TIMEOUT_MS) });
+    upstream = await fetch(base + path, {
+      ...init,
+      signal: AbortSignal.timeout(RENDER_TIMEOUT_MS),
+    });
   } catch (err) {
-    const timedOut = err instanceof DOMException && err.name === "TimeoutError";
+    const timedOut =
+      err instanceof DOMException &&
+      err.name === "TimeoutError";
+
     return json(timedOut ? 504 : 502, {
       detail: timedOut
         ? "The model server did not answer in time. It may still be waking up; try again in a minute."
         : "Could not reach the model server.",
     });
   }
-  // Pass status and JSON body through (FastAPI 422 details are useful to the user).
+
   return new Response(upstream.body, {
     status: upstream.status,
-    headers: { "content-type": upstream.headers.get("content-type") ?? "application/json" },
+    headers: {
+      "content-type":
+        upstream.headers.get("content-type") ??
+        "application/json",
+    },
   });
 }
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
-    const { pathname } = new URL(request.url);
+    const url = new URL(request.url);
+    const { pathname } = url;
 
-    if (pathname === "/api/health") {
-      if (request.method !== "GET") return json(405, { detail: "Use GET." });
-      return forward(env, "/health", { method: "GET" });
+    // 1. Better Auth: signup, login, logout, sessions
+    if (pathname.startsWith("/api/auth/")) {
+      if (!env.BETTER_AUTH_SECRET) {
+        return json(503, {
+          detail: "Authentication is not configured.",
+        });
+      }
+
+      const auth = createAuth(
+        env.DB,
+        env.BETTER_AUTH_SECRET,
+        url.origin
+      );
+
+      return auth.handler(request);
     }
 
-    if (pathname === "/api/analyze/keypoints") {
-      if (request.method !== "POST") return json(405, { detail: "Use POST." });
-      if (!(request.headers.get("content-type") ?? "").includes("application/json")) {
-        return json(415, { detail: "Send keypoints as application/json." });
+    // 2. Render model health check
+    if (pathname === "/api/health") {
+      if (request.method !== "GET") {
+        return json(405, {
+          detail: "Use GET.",
+        });
       }
-      const length = Number(request.headers.get("content-length"));
-      if (!length) return json(411, { detail: "Content-Length is required." });
-      if (length > MAX_KEYPOINT_BYTES) return json(413, { detail: "Keypoint payload is too large; use a shorter clip." });
-      // Stream the body straight through: {"frames": [T][17][3]}, validated by the Render API.
+
+      return forward(env, "/health", {
+        method: "GET",
+      });
+    }
+
+    // 3. Identify protected routes
+    const isHistoryRoute =
+      pathname === "/api/history" ||
+      pathname.startsWith("/api/history/");
+
+    const isAnalysisRoute =
+      pathname === "/api/analyze/keypoints";
+
+    const protectedRoute =
+      isHistoryRoute || isAnalysisRoute;
+
+    // This value comes ONLY from the server-verified session.
+    // Never read it from a request header or request body.
+    let authenticatedUserId: string | null = null;
+
+    // 4. Require login for analysis and history
+    if (protectedRoute) {
+      if (!env.BETTER_AUTH_SECRET) {
+        return json(503, {
+          detail: "Authentication is not configured.",
+        });
+      }
+
+      const auth = createAuth(
+        env.DB,
+        env.BETTER_AUTH_SECRET,
+        url.origin
+      );
+
+      let session;
+
+      try {
+        session = await auth.api.getSession({
+          headers: request.headers,
+        });
+      } catch (err) {
+        console.error("session verification error", err);
+
+        return json(500, {
+          detail: "Could not verify your session.",
+        });
+      }
+
+      if (!session?.user?.id) {
+        return json(401, {
+          detail: "Please log in to use Motion Atlas.",
+        });
+      }
+
+      authenticatedUserId = session.user.id;
+    }
+
+    // 5. Analyze keypoints using the Render API
+    if (isAnalysisRoute) {
+      if (request.method !== "POST") {
+        return json(405, {
+          detail: "Use POST.",
+        });
+      }
+
+      if (
+        !(request.headers.get("content-type") ?? "")
+          .includes("application/json")
+      ) {
+        return json(415, {
+          detail: "Send keypoints as application/json.",
+        });
+      }
+
+      const length = Number(
+        request.headers.get("content-length")
+      );
+
+      if (!length) {
+        return json(411, {
+          detail: "Content-Length is required.",
+        });
+      }
+
+      if (length > MAX_KEYPOINT_BYTES) {
+        return json(413, {
+          detail:
+            "Keypoint payload is too large; use a shorter clip.",
+        });
+      }
+
       return forward(env, "/predict/keypoints", {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: {
+          "content-type": "application/json",
+        },
         body: request.body,
       });
     }
 
-    if (pathname === "/api/history" || pathname.startsWith("/api/history/")) {
+    // 6. Analysis history in Cloudflare D1
+    if (isHistoryRoute) {
+      if (!authenticatedUserId) {
+        return json(401, {
+          detail: "Please log in to use Motion Atlas.",
+        });
+      }
+
       try {
-        return await handleHistory(request, env, pathname);
+        return await handleHistory(
+          request,
+          env,
+          pathname,
+          authenticatedUserId
+        );
       } catch (err) {
         console.error("history route error", err);
-        return json(500, { detail: "History request failed." });
+
+        return json(500, {
+          detail: "History request failed.",
+        });
       }
     }
 
-    if (pathname.startsWith("/api/")) return json(404, { detail: "Unknown API route." });
+    // 7. Unknown API routes
+    if (pathname.startsWith("/api/")) {
+      return json(404, {
+        detail: "Unknown API route.",
+      });
+    }
+
+    // 8. Serve the React application
     return env.ASSETS.fetch(request);
   },
-} satisfies ExportedHandler<Env>;
+};
