@@ -1,3 +1,6 @@
+
+import { authClient } from "./auth-client";
+import { AuthScreen } from "./AuthScreen";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { analyzeKeypoints, wakeModelServer, type KeypointResult, type ScoredWindow } from "./api";
 import { HistoryPanel, type HistoryState } from "./components/HistoryPanel";
@@ -44,7 +47,7 @@ const HISTORY_LIMIT = 20;
 const clock = (s: number) => `${Math.floor(s / 60)}:${(s % 60).toFixed(1).padStart(4, "0")}`;
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
-export default function App() {
+function AppContent() {
   const [detector, setDetector] = useState<{ detector: Detector; backend: string } | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [file, setFile] = useState<File | null>(null);
@@ -96,11 +99,15 @@ export default function App() {
 
   async function run(f: File) {
     if (!detector) return;
+
+    if (multiMode) {
+      // Experimental: separate analysis per tracked person, nothing saved to History
     if (multiMode) {   // separate analysis per tracked person; nothing saved to History
       wakeModelServer();
       setMultiFile(f);
       return;
     }
+
     wakeModelServer();
     runSeq.current += 1;
     setRestored(null); setPlayback(null); setSave({ kind: "idle" });
@@ -108,6 +115,7 @@ export default function App() {
     const url = URL.createObjectURL(f);
     setVideoUrl(url);
     let ex: VideoExtraction;
+
     try {
       setStage({ kind: "extracting", done: 0, total: 0 });
       ex = await extractVideo(url, detector.detector, (done, total) => setStage({ kind: "extracting", done, total }));
@@ -115,6 +123,7 @@ export default function App() {
       setStage({ kind: "error", message: `Could not read this video in the browser: ${String(e)}` });
       return;
     }
+
     setExtraction(ex);
     setQuality(assessQuality(ex.frames, ex.detection));
     await analyze(ex);
@@ -152,7 +161,7 @@ export default function App() {
         : h));
       if (history.kind !== "ready") refreshHistory();
     }
-    if (seq !== runSeq.current) return;   // a newer video was chosen while saving
+    if (seq !== runSeq.current) return;
     setSave(outcome.saved ? { kind: "saved", id: outcome.item.id } : { kind: "failed", message: outcome.message });
   }
 
@@ -166,7 +175,7 @@ export default function App() {
     setHistoryBusy(item.id); setHistoryError(null);
     try {
       const saved = await loadHistory(item.id);
-      setMultiMode(false);   // History only holds single-person analyses
+      setMultiMode(false);
       setPlayback(null);
       setRestored(saved);
     } catch (e) {
@@ -209,8 +218,7 @@ export default function App() {
       : null;
   const canPlay = restored ? playback != null : videoUrl != null;
 
-  // Exploratory threshold (display only): starts at the trained threshold for every result shown,
-  // and never changes the scores, the trained threshold, the API, or what is saved to History.
+  // Exploratory threshold (display only): starts at the trained threshold for every result shown.
   const viewResult = view?.result ?? null;
   const [userThreshold, setUserThreshold] = useState<number | null>(null);
   useEffect(() => { setUserThreshold(null); }, [viewResult]);
@@ -228,6 +236,9 @@ export default function App() {
   const trainedCount = viewResult?.windows.filter((w) => w.above_threshold).length ?? 0;
   const flagged = viewResult?.windows.filter((_, i) => cls.flagged[i]) ?? [];
   const jump = (w: ScoredWindow) => { if (canPlay) player.current?.playFrom(w.start_seconds); };
+  const scheduleContext: AnalysisContext | null = viewResult
+    ? { flagged: trainedCount, total: viewResult.windows.length, durationS: view?.durationS ?? null, saved: restored != null }
+    : null;
   // This result as a shift-review clip: trained-threshold counts only, never the exploratory value.
   const reviewClip: ReviewClip | null = viewResult ? {
     id: restored ? `saved:${restored.item.id}` : `single:${file?.name}:${file?.size}:${file?.lastModified}`,
@@ -246,6 +257,26 @@ export default function App() {
           <span className="brand-mark" aria-hidden="true" />
           <h1>Motion Atlas</h1>
         </div>
+
+        <button
+          type="button"
+          className="button-secondary"
+          onClick={async () => {
+            try {
+              const result = await authClient.signOut();
+              if (result.error) {
+                window.alert(result.error.message ?? "Could not log out.");
+                return;
+              }
+              window.location.reload();
+            } catch {
+              window.alert("Could not log out. Please try again.");
+            }
+          }}
+        >
+          Log out
+        </button>
+
         <p className="app-tagline">
           {tab === "analysis"
             ? "Video movement analysis. Your video is processed in this browser and is never uploaded; only body keypoints are sent for scoring."
@@ -514,4 +545,18 @@ function Diagnostics({ extraction: r, quality, backend, fileName }: { extraction
       <button onClick={download}>Download keypoints CSV</button>
     </details>
   );
+}
+
+export default function App() {
+  const { data: session, isPending } = authClient.useSession();
+
+  if (isPending) {
+    return <p>Checking login...</p>;
+  }
+
+  if (!session) {
+    return <AuthScreen />;
+  }
+
+  return <AppContent />;
 }
