@@ -26,13 +26,30 @@ export async function localD1() {
   return proxy;
 }
 
-export const newBrowserId = () => crypto.randomUUID();
+/** Test-only Better Auth secret (32+ characters). */
+export const TEST_AUTH_SECRET = "test-only-better-auth-secret-0123456789abcdef";
 
-/** Call the Worker like the browser would. */
+/**
+ * Sign up a fresh user through the Worker's own Better Auth routes and return the session cookie
+ * ("name=value; ..."), as the browser would send it. History is scoped to that user.
+ */
+export async function signUp(worker, env, { email = `${crypto.randomUUID()}@example.test`, password = "correct-horse-battery-staple", name = "Test user" } = {}) {
+  const res = await worker.fetch(new Request("http://app.test/api/auth/sign-up/email", {
+    method: "POST", headers: { "content-type": "application/json", origin: "http://app.test" },
+    body: JSON.stringify({ email, password, name }),
+  }), env);
+  if (res.status !== 200) throw new Error(`sign-up failed: HTTP ${res.status} ${await res.text()}`);
+  const data = await res.json();
+  const cookie = res.headers.getSetCookie().map((c) => c.split(";")[0]).join("; ");
+  if (!cookie) throw new Error("sign-up returned no session cookie");
+  return { cookie, userId: data.user.id, email };
+}
+
+/** Call the Worker like the browser would (`cookie`: the session cookie from signUp, if logged in). */
 export function caller(worker, env) {
-  return async (path, { method = "GET", browserId, body, headers = {} } = {}) => {
+  return async (path, { method = "GET", cookie, body, headers = {} } = {}) => {
     const h = new Headers(headers);
-    if (browserId) h.set("x-browser-id", browserId);
+    if (cookie) h.set("cookie", cookie);
     if (body !== undefined && !h.has("content-type")) h.set("content-type", "application/json");
     const res = await worker.fetch(new Request(`http://app.test${path}`, {
       method, headers: h, body: body === undefined ? undefined : typeof body === "string" ? body : JSON.stringify(body),

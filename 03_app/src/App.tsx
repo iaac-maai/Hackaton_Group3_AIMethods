@@ -100,8 +100,6 @@ function AppContent() {
   async function run(f: File) {
     if (!detector) return;
 
-    if (multiMode) {
-      // Experimental: separate analysis per tracked person, nothing saved to History
     if (multiMode) {   // separate analysis per tracked person; nothing saved to History
       wakeModelServer();
       setMultiFile(f);
@@ -236,9 +234,6 @@ function AppContent() {
   const trainedCount = viewResult?.windows.filter((w) => w.above_threshold).length ?? 0;
   const flagged = viewResult?.windows.filter((_, i) => cls.flagged[i]) ?? [];
   const jump = (w: ScoredWindow) => { if (canPlay) player.current?.playFrom(w.start_seconds); };
-  const scheduleContext: AnalysisContext | null = viewResult
-    ? { flagged: trainedCount, total: viewResult.windows.length, durationS: view?.durationS ?? null, saved: restored != null }
-    : null;
   // This result as a shift-review clip: trained-threshold counts only, never the exploratory value.
   const reviewClip: ReviewClip | null = viewResult ? {
     id: restored ? `saved:${restored.item.id}` : `single:${file?.name}:${file?.size}:${file?.lastModified}`,

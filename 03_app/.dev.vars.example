@@ -1,3 +1,7 @@
 # Copy to .dev.vars for local development (not committed).
 # Local model server: python -m uvicorn app:app --app-dir 02_model_server --port 8000
 RENDER_API_URL=http://127.0.0.1:8000
+# Better Auth session-signing secret for local login. Generate one with `npx @better-auth/cli secret`
+# and paste it here in .dev.vars only. Use a different value than production (set there with
+# `npx wrangler secret put BETTER_AUTH_SECRET`). Never commit a real value.
+BETTER_AUTH_SECRET=
