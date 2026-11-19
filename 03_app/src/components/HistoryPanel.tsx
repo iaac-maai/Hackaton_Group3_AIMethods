@@ -1,4 +1,6 @@
 import type { HistoryItem } from "../history";
+import { InfoTip } from "./ui/InfoTip";
+import { WindowCount } from "./ui/WindowCount";
 
 // Recent saved analyses for this browser. Selecting a row restores its summary and timeline.
 
@@ -22,11 +24,15 @@ const dateFmt = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeSt
 export function HistoryPanel({ state, selectedId, busyId, actionError, onSelect, onDelete, onRetry }: Props) {
   return (
     <section className="history" id="history" aria-labelledby="history-title">
-      <h2 id="history-title">History</h2>
-      <p className="muted">
-        Recent analyses saved from this browser (summaries and window scores only, no video or keypoints). Saved records are
-        tied to a random ID stored in this browser; this is not a login, so don’t analyse confidential footage.
-      </p>
+      <div className="history-head">
+        <h2 id="history-title">History</h2>
+        <InfoTip label="About History">
+          <p>
+            Recent analyses saved from this browser (summaries and window scores only, no video or keypoints). Saved records are
+            tied to a random ID stored in this browser; this is not a login, so don’t analyse confidential footage.
+          </p>
+        </InfoTip>
+      </div>
       {state.kind === "loading" && <p role="status">Loading saved analyses…</p>}
       {state.kind === "error" && (
         <div className="error-box" role="alert">
@@ -41,15 +47,16 @@ export function HistoryPanel({ state, selectedId, busyId, actionError, onSelect,
       {state.kind === "ready" && state.items.length > 0 && (
         <ul className="history-list">
           {state.items.map((item) => (
-            <li key={item.id} className={item.id === selectedId ? "selected" : undefined}>
+            <li key={item.id} className={`history-card mo-lift mo-fade-up ${item.id === selectedId ? "selected" : ""}`}>
               <button className="history-open" aria-pressed={item.id === selectedId} disabled={busyId === item.id}
                 onClick={() => onSelect(item)}>
                 <span className="history-date">{dateFmt.format(new Date(item.created_at))}</span>
                 <span>{item.label}</span>
                 <span className="muted">{item.duration_seconds != null ? `${item.duration_seconds.toFixed(1)} s` : "duration —"}</span>
-                <span className="muted">
+                <span className="muted history-count">
                   {item.flagged_count} of {item.window_count} windows flagged ({item.flagged_percent.toFixed(0)}%)
                 </span>
+                <WindowCount total={item.window_count} flagged={item.flagged_count} />
               </button>
               <button className="history-delete" disabled={busyId === item.id}
                 aria-label={`Delete the analysis from ${dateFmt.format(new Date(item.created_at))}`}

@@ -6,6 +6,10 @@ import logo from "./assets/motion-atlas-logo-compact.png";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { analyzeKeypoints, wakeModelServer, type KeypointResult, type ScoredWindow } from "./api";
 import { HistoryPanel, type HistoryState } from "./components/HistoryPanel";
+import { IconChevron, IconSliders, IconVideoUpload } from "./components/ui/Icons";
+import { InfoTip } from "./components/ui/InfoTip";
+import { Ring } from "./components/ui/Ring";
+import { ScoreBar } from "./components/ui/ScoreBar";
 import { MultiPersonAnalysis } from "./components/MultiPersonAnalysis";
 import { SchedulePlanner } from "./components/SchedulePlanner";
 import { ScoreTimeline } from "./components/ScoreTimeline";
@@ -222,6 +226,7 @@ function AppContent() {
   const viewResult = view?.result ?? null;
   const [userThreshold, setUserThreshold] = useState<number | null>(null);
   useEffect(() => { setUserThreshold(null); }, [viewResult]);
+  const [hoverWin, setHoverWin] = useState<number | null>(null);   // display only: links chart bars and flagged-moment buttons
   const trained = viewResult?.threshold ?? 0;
   const range = useMemo(
     () => sliderRange(viewResult?.windows.map((w) => w.reconstruction_score) ?? [], trained),
@@ -284,13 +289,29 @@ function AppContent() {
 
       <div role="tabpanel" id={panelId("analysis")} aria-labelledby={tabId("analysis")} hidden={tab !== "analysis"}>
 
+      {!(multiMode ? multiFile : file) && !restored && !recording && (
+        <button type="button" className="drop-zone mo-lift mo-fade-up" disabled={!detector || busy || multiBusy || recording}
+          onClick={() => fileInput.current?.click()}>
+          <span className="drop-zone-icon"><IconVideoUpload /></span>
+          <span className="drop-zone-title">{detector ? "Choose a video to analyze" : "Loading pose model…"}</span>
+          <span className="drop-zone-sub">Click here to open your files</span>
+        </button>
+      )}
+      {!(multiMode ? multiFile : file) && !restored && !recording && (
+        <ol className="steps mo-fade-up mo-delay-1" aria-label="How it works">
+          <li><span className="step-num">1</span>Choose a video</li>
+          <li><span className="step-num">2</span>Pose is found in this browser</li>
+          <li><span className="step-num">3</span>Flagged windows appear</li>
+        </ol>
+      )}
+
       <section className="picker">
         <button className="button" disabled={!detector || busy || multiBusy || recording} onClick={() => fileInput.current?.click()}>
           {detector ? "Choose a video" : "Loading pose model…"}
         </button>
         <input ref={fileInput} type="file" accept="video/*" disabled={!detector || busy || multiBusy || recording} hidden
           onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) run(f); }} />
-        <button ref={recordButton} className="button" disabled={!detector || busy || multiBusy || recording}
+        <button ref={recordButton} className="button-secondary" disabled={!detector || busy || multiBusy || recording}
           aria-expanded={recording} onClick={() => setRecording(true)}>
           Record and analyze
         </button>
@@ -300,17 +321,23 @@ function AppContent() {
       </section>
 
       <section className="mode-switch" aria-label="Analysis mode">
-        <button type="button" role="switch" aria-checked={multiMode} className="switch" disabled={busy || multiBusy || recording}
-          onClick={() => setMultiMode((m) => !m)}>
-          <span className="switch-track" aria-hidden="true"><span className="switch-thumb" /></span>
-          <span className="switch-label">Analyze multiple people</span>
-          <span className="switch-state" aria-hidden="true">{multiMode ? "On" : "Off"}</span>
-        </button>
-        <p className="muted switch-note">
-          {multiMode ? "Each person gets a label (Track A, B, C …) that applies only within the current video. " : "When on, each person is analysed separately. "}
-          Tracking can miss or switch people, especially when they’re small, partly hidden or close together.
-        </p>
+        <div className="mode-switch-row">
+          <button type="button" role="switch" aria-checked={multiMode} className="switch" disabled={busy || multiBusy || recording}
+            onClick={() => setMultiMode((m) => !m)}>
+            <span className="switch-track" aria-hidden="true"><span className="switch-thumb" /></span>
+            <span className="switch-label">Analyze multiple people</span>
+            <span className="switch-state" aria-hidden="true">{multiMode ? "On" : "Off"}</span>
+          </button>
+          <InfoTip label="About analysing multiple people">
+            <p className="switch-note">
+              {multiMode ? "Each person gets a label (Track A, B, C …) that applies only within the current video. " : "When on, each person is analysed separately. "}
+              Tracking can miss or switch people, especially when they’re small, partly hidden or close together.
+            </p>
+          </InfoTip>
+        </div>
         {multiMode && (
+          <details className="advanced">
+            <summary><IconSliders /> Advanced settings <IconChevron className="advanced-chevron" /></summary>
           <div className="multi-settings">
             <label className="field narrow"><span>Detector input size</span>
               <select value={multiSettings.maxDimension} disabled={multiBusy}
@@ -330,6 +357,7 @@ function AppContent() {
               Changing a setting re-runs the current video.
             </p>
           </div>
+          </details>
         )}
       </section>
 
@@ -392,7 +420,9 @@ function AppContent() {
               <button type="button" disabled={inReview(reviewClip.id)} onClick={() => addToReview(reviewClip)}>
                 {inReview(reviewClip.id) ? "✓ In the shift review" : "Add to shift review"}
               </button>
-              <span className="muted">For the Schedule tab. Keeps only this summary, on this page.</span>
+              <InfoTip label="About adding to the shift review">
+                <p>For the Schedule tab. Keeps only this summary, on this page.</p>
+              </InfoTip>
             </div>
           )}
           {!restored && save.kind === "saving" && <p className="save-status muted" role="status">Saving to history…</p>}
@@ -404,7 +434,8 @@ function AppContent() {
             </div>
           )}
           <div className="tiles">
-            <div className={`tile tile-primary ${custom ? "is-custom" : ""}`}>
+            <div className={`tile tile-primary has-ring ${custom ? "is-custom" : ""}`}>
+              <Ring value={view.result.windows.length ? cls.count / view.result.windows.length : 0} />
               <span className="tile-label">Windows above {custom ? "your threshold" : "threshold"}</span>
               <span className="tile-value">{cls.count} <span className="tile-of">of {view.result.windows.length}</span></span>
               <span className="muted">
@@ -429,7 +460,8 @@ function AppContent() {
           </p>
 
           <ScoreTimeline windows={view.result.windows} trainedThreshold={trained} threshold={shownThreshold}
-            flagged={cls.flagged} durationS={view.durationS ?? 0} windowS={WINDOW_S} canPlay={canPlay} onSelect={jump} />
+            flagged={cls.flagged} durationS={view.durationS ?? 0} windowS={WINDOW_S} canPlay={canPlay} onSelect={jump}
+            linked={hoverWin} onHover={setHoverWin} />
 
           <ThresholdControl value={shownThreshold} trained={trained} range={range} count={cls.count}
             total={view.result.windows.length} trainedCount={trainedCount}
@@ -444,8 +476,10 @@ function AppContent() {
               {!canPlay && <p className="muted">Open your local copy of the video above to jump to these moments.</p>}
               <ul>
                 {flagged.map((w) => (
-                  <li key={w.window}>
+                  <li key={w.window} className={hoverWin === w.window ? "linked" : undefined}
+                    onMouseEnter={() => setHoverWin(w.window)} onMouseLeave={() => setHoverWin(null)}>
                     <button disabled={!canPlay} onClick={() => jump(w)}>▶ {clock(w.start_seconds)}–{clock(w.end_seconds ?? w.start_seconds + WINDOW_S)}</button>
+                    <ScoreBar score={w.reconstruction_score} windows={view.result.windows} />
                     <span className="muted"> score {w.reconstruction_score.toFixed(3)}</span>
                   </li>
                 ))}
@@ -483,7 +517,8 @@ function AppContent() {
       </div>
 
       <div role="tabpanel" id={panelId("schedule")} aria-labelledby={tabId("schedule")} hidden={tab !== "schedule"}>
-        <SchedulePlanner reviewClips={reviewClips} onRemoveClip={(id) => setReviewClips((cs) => cs.filter((c) => c.id !== id))} />
+        <SchedulePlanner reviewClips={reviewClips} onRemoveClip={(id) => setReviewClips((cs) => cs.filter((c) => c.id !== id))}
+          onGoToAnalysis={() => setTab("analysis")} />
       </div>
     </main>
   );

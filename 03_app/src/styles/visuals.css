@@ -1,0 +1,184 @@
+/* New visual elements, built from the existing tokens and card styles in styles.css. */
+
+/* ---------- Analysis: video drop zone (a large click target for the existing file picker) ---------- */
+.drop-zone {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px;
+  width: 100%; min-height: 240px; margin: 0 0 16px; padding: 32px 20px; text-align: center;
+  background: var(--card-bg); color: var(--ink);
+  border: 1.5px dashed rgb(246 112 20 / 0.45); border-radius: 20px;
+  box-shadow: var(--glow-inset), var(--shadow);
+}
+.drop-zone:hover:not(:disabled) { border-color: var(--accent); }
+.drop-zone-icon {
+  display: grid; place-items: center; width: 76px; height: 76px; border-radius: 50%; color: var(--accent);
+  background: rgb(246 112 20 / 0.10); border: 1px solid rgb(246 112 20 / 0.3);
+  box-shadow: 0 0 30px rgb(246 112 20 / 0.25);
+}
+.drop-zone-title { font-size: 1.15rem; font-weight: 500; }
+.drop-zone-sub { color: var(--ink-2); font-size: 0.9rem; font-weight: 400; }
+.drop-zone:disabled .drop-zone-icon { color: var(--muted); }
+
+/* ---------- Numbered steps (under the drop zone) ---------- */
+.steps { list-style: none; padding: 0; margin: -4px 0 18px; display: flex; flex-wrap: wrap; justify-content: center; gap: 8px 22px; }
+.steps li { display: inline-flex; align-items: center; gap: 8px; color: var(--ink); font-size: 0.92rem; font-weight: 400; }
+.step-num {
+  display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; flex: none;
+  font-size: 0.78rem; font-weight: 500; font-variant-numeric: tabular-nums; color: var(--accent);
+  background: rgb(246 112 20 / 0.10); border: 1px solid rgb(246 112 20 / 0.35);
+}
+
+/* ---------- Info icon that opens the full text ---------- */
+.info-tip { display: inline-block; position: relative; }
+.info-tip > summary {
+  list-style: none; display: inline-grid; place-items: center; width: 32px; height: 32px; margin: 0; border-radius: 50%;
+  color: var(--ink-2); background: rgb(255 255 255 / 0.04); border: 1px solid var(--line); cursor: pointer;
+}
+.info-tip > summary::-webkit-details-marker { display: none; }
+.info-tip > summary:hover, .info-tip[open] > summary { color: var(--accent); border-color: rgb(246 112 20 / 0.5); }
+.info-tip-body {
+  margin-top: 8px; padding: 10px 14px; max-width: 70ch; border-radius: 14px;
+  background: rgb(255 255 255 / 0.03); border: 1px solid var(--line); color: var(--ink); font-size: 0.92rem; font-weight: 400;
+}
+.info-tip-body p { margin: 0; color: var(--ink); font-size: inherit; font-weight: inherit; }
+.mode-switch-row, .history-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
+/* Wider screens: the text opens as a panel under the icon, over the content below */
+@media (min-width: 601px) {
+  .info-tip-body {
+    position: absolute; z-index: 5; top: 100%; left: 0; width: max-content; max-width: min(560px, 70vw);
+    background: var(--surface); box-shadow: 0 10px 30px rgb(0 0 0 / 0.5);
+  }
+}
+/* Phones: it drops onto its own line under the row it belongs to */
+@media (max-width: 600px) {
+  .mode-switch-row .info-tip[open], .history-head .info-tip[open] { display: contents; }
+  .info-tip[open] > .info-tip-body { flex-basis: 100%; order: 3; }
+}
+
+/* ---------- Analysis mode: card around the switch, Advanced settings ---------- */
+.mode-switch {
+  padding: 10px 16px; background: var(--card-bg); border: 1px solid var(--line); border-radius: 20px;
+  box-shadow: var(--glow-inset), var(--shadow);
+}
+.advanced { margin-top: 6px; }
+.advanced > summary {
+  list-style: none; display: inline-flex; align-items: center; gap: 8px; min-height: 40px; margin: 0;
+  color: var(--ink); font-weight: 500; cursor: pointer;
+}
+.advanced > summary::-webkit-details-marker { display: none; }
+.advanced > summary:hover { color: var(--accent); }
+.advanced-chevron { transition: transform 160ms var(--ease-out); }
+.advanced[open] .advanced-chevron { transform: rotate(180deg); }
+.advanced .multi-settings { margin-top: 6px; }
+
+/* ---------- History cards with the window count strip ---------- */
+.history-head h2 { margin: 0; }
+.history { margin-top: 32px; }
+.history-card {
+  padding: 6px; background: var(--card-bg); border: 1px solid var(--line); border-radius: 18px;
+  box-shadow: var(--glow-inset), var(--shadow);
+}
+.history-card .history-open, .history-card .history-open:hover:not(:disabled) {
+  background: transparent; border: 0; box-shadow: none; transform: none; padding: 10px 12px; align-items: baseline;
+}
+.history-list li.history-card.selected { border-color: var(--flag); }
+.history-list li.history-card.selected .history-open { border: 0; box-shadow: none; }
+.history-card .history-delete { align-self: center; }
+.history-count { color: var(--ink-2); }
+.window-count { flex-basis: 100%; display: flex; gap: 2px; height: 10px; margin-top: 4px; overflow: hidden; }
+.window-count > span { flex: 1 1 0; min-width: 2px; max-width: 14px; border-radius: 2px; background: var(--bar); opacity: 0.55; }
+.window-count > span.on { background: var(--flag); opacity: 1; }
+
+/* =====================================================================================
+   Analysis results
+   ===================================================================================== */
+
+/* ---------- Tags with icons (run summary, notes, score meaning, track header) ---------- */
+.chip-row { list-style: none; padding: 0; margin: 0 0 10px; display: flex; flex-wrap: wrap; gap: 6px 8px; }
+.chip-tag {
+  display: inline-flex; align-items: center; gap: 6px; padding: 5px 11px; border-radius: 999px;
+  font-size: 0.85rem; font-weight: 400; color: var(--ink); font-variant-numeric: tabular-nums;
+  background: rgb(255 255 255 / 0.04); border: 1px solid var(--line);
+}
+.chip-tag svg { color: var(--accent); flex: none; }
+.chip-tag.ok svg { color: var(--ink); }
+.chip-tag.warn { background: var(--warn-bg); color: var(--warn-ink); border-color: rgb(246 198 122 / 0.25); }
+.chip-tag.warn svg { color: var(--warn-ink); }
+.run-summary { margin: 4px 0 14px; }
+
+/* "Details" that opens the full original paragraph */
+.details-tag { margin: 0; }
+.details-tag > summary {
+  list-style: none; display: inline-flex; align-items: center; gap: 6px; margin: 0; padding: 3px 12px; border-radius: 999px;
+  font-size: 0.85rem; font-weight: 500; color: var(--ink-2); border: 1px dashed var(--axis); cursor: pointer;
+}
+.details-tag > summary::-webkit-details-marker { display: none; }
+.details-tag > summary::after { content: "+"; color: var(--accent); }
+.details-tag[open] > summary::after { content: "−"; }
+.details-tag > summary:hover { color: var(--ink); border-color: var(--accent); }
+.details-tag > p { margin: 8px 0 0; color: var(--ink); font-size: 0.92rem; font-weight: 400; max-width: 75ch; }
+
+/* Track-label note: glass panel with an icon and an orange border */
+.note-panel {
+  display: flex; gap: 12px; align-items: flex-start; margin: 0 0 12px; padding: 12px 16px;
+  background: var(--card-bg); border: 1px solid rgb(246 112 20 / 0.55); border-radius: 16px;
+  box-shadow: var(--glow-inset), var(--shadow);
+}
+.note-panel-icon { color: var(--accent); padding-top: 3px; flex: none; }
+.note-panel .chip-row { margin-bottom: 8px; }
+.score-meaning { margin: 4px 0 12px; }
+.score-meaning .chip-row { margin-bottom: 6px; }
+
+/* ---------- Track card ---------- */
+.track-card {
+  margin-top: 4px; padding: 16px 18px; background: var(--card-bg); border: 1px solid var(--line); border-radius: 20px;
+  box-shadow: var(--glow-inset), var(--shadow);
+}
+.track-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; margin-bottom: 10px; }
+.track-head h2 { margin: 0 6px 0 0; }
+.track-head .track-swatch { width: 34px; height: 34px; }
+
+.vis-strip-wrap { display: flex; align-items: center; gap: 12px; margin: 0 0 12px; }
+.vis-strip { position: relative; flex: 1; height: 10px; border-radius: 999px; background: var(--grid); overflow: hidden; }
+.vis-strip > span { position: absolute; top: 0; bottom: 0; background: var(--ink-2); border-radius: 999px; }
+.vis-strip-label { flex: none; font-size: 0.85rem; font-weight: 500; color: var(--ink); font-variant-numeric: tabular-nums; }
+
+.win-blocks { margin: 4px 0 14px; }
+.win-lane {
+  position: relative; height: 56px; border-radius: 10px;
+  background: repeating-linear-gradient(90deg, transparent 0 6px, rgb(255 255 255 / 0.05) 6px 9px);
+  border-bottom: 1px dashed var(--axis);
+}
+.win-uncertain { position: absolute; top: 0; bottom: 0; border: 1px dashed var(--warn-ink); border-radius: 8px; opacity: 0.6; pointer-events: auto; }
+.win-block, .win-block:hover:not(:disabled) {
+  position: absolute; bottom: 0; min-width: 3px; padding: 0; margin: 0; border: 0; border-radius: 4px 4px 0 0;
+  background: var(--bar); box-shadow: none; transform-origin: bottom center;
+}
+.win-block.on, .win-block.on:hover:not(:disabled) { background: var(--flag); box-shadow: 0 0 10px rgb(246 111 20 / 0.45); }
+.win-block:hover:not(:disabled), .win-block.hover { opacity: 1; filter: brightness(1.25); }
+.win-axis { display: flex; justify-content: space-between; margin-top: 4px; font-size: 0.78rem; font-weight: 400; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+
+/* ---------- Stat tiles with a ring ---------- */
+.tile.has-ring { position: relative; padding-right: 84px; }
+.tile.has-ring > .ring { position: absolute; top: 50%; right: 16px; margin-top: -27px; }
+.ring-track { fill: none; stroke: var(--grid); stroke-width: 5; }
+.ring-value { fill: none; stroke: var(--accent); stroke-width: 5; stroke-linecap: round; filter: drop-shadow(0 0 4px rgb(246 111 20 / 0.5)); }
+.ring-text { fill: var(--ink); font-size: 11px; font-weight: 500; font-family: var(--font-body); font-variant-numeric: tabular-nums; }
+
+/* ---------- Flagged moments: score bar, and the link with the chart ---------- */
+.moments li { display: inline-flex; align-items: center; gap: 8px; }
+.score-bar { display: inline-block; width: 56px; height: 6px; border-radius: 999px; background: var(--grid); overflow: hidden; }
+.score-bar > span { display: block; height: 100%; background: var(--flag); border-radius: 999px; }
+.moments li.linked button { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent), 0 0 14px rgb(246 111 20 / 0.35); }
+
+/* ---------- "Show the skeleton" checkboxes drawn as switches (same checkbox underneath) ---------- */
+.toggle { gap: 10px; min-height: 40px; font-weight: 500; cursor: pointer; }
+.toggle input[type="checkbox"] {
+  appearance: none; -webkit-appearance: none; flex: none; width: 44px; height: 26px; margin: 0; border-radius: 999px;
+  position: relative; background: var(--axis); cursor: pointer;
+}
+.toggle input[type="checkbox"]::before {
+  content: ""; position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 50%; background: #fff;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.3); transition: transform 0.15s;
+}
+.toggle input[type="checkbox"]:checked { background: var(--flag); box-shadow: 0 0 14px rgb(246 111 20 / 0.5); }
+.toggle input[type="checkbox"]:checked::before { transform: translateX(18px); }
