@@ -14,7 +14,7 @@ Video-first movement analysis. You pick a video and the browser extracts one bod
 You need an account to use the app. The page shows a sign-up / log-in screen (email and password) until you're logged in, and **Log out** in the header ends the session. Accounts and sessions are handled by [Better Auth](https://www.better-auth.com/) in the Worker (`worker/auth.ts`, routes under `/api/auth/*`) and stored in the same D1 database (`migrations/0002_create_auth_tables.sql`: `user`, `session`, `account`, `verification`).
 
 - The session is an HttpOnly cookie that the browser sends on same-origin requests. The Worker checks it on every protected route.
-- **Analysis (`/api/analyze/keypoints`) and History (`/api/history…`) need a valid session.** Without one they answer 401 "Please log in to use Motion Atlas." `/api/health` and the page itself stay public.
+- **Analysis (`/api/analyze/keypoints`), History (`/api/history…`) and Analytics (`/api/analytics`) need a valid session.** Without one they answer 401 "Please log in to use Motion Atlas." `/api/health` and the page itself stay public.
 - Whose history a request sees comes **only** from the verified session. The app sends no browser or user ID, and the Worker ignores any it's sent.
 - Sign-up is open to anyone who can reach the site, and email addresses aren't verified. Treat this as a prototype: **don't analyse confidential footage or sensitive personal data with it.**
 
@@ -39,6 +39,28 @@ After each successful analysis the app saves a summary to a D1 database (binding
 | `DELETE /api/history/<id>` | delete one saved analysis |
 
 All four need a logged-in session (401 otherwise). Another user's record answers 404.
+
+## Analytics tab
+
+The **Analytics** tab summarises your own saved History. It shows:
+
+- totals: saved analyses, scored windows, flagged windows and their share, how many analyses had at least one flagged window, and total clip time (analyses saved without a duration are counted separately);
+- **saved analyses per period** (bar chart) and **flagged share of windows per period** (line chart). The period is a day for up to a month of data, a week for up to about six months, and a month beyond that. The flagged share is flagged windows ÷ all scored windows in that period. Periods with no saved analysis are left blank rather than shown as 0%;
+- a short plain-language summary, including whether the flagged share was higher, lower or similar in your more recent periods. With fewer than four periods of data it makes no trend claim;
+- a breakdown by analysis type. Today the app saves only single-person video analyses, so this just says so; other stored types would appear as a table;
+- a note when your records were scored with more than one model/threshold setting, because flagged shares from different settings aren't directly comparable.
+
+Each chart has a text description, a native hover tooltip on every mark, and a **Show the data as a table** view. The charts resize to the container width, so they work at phone width. Loading, error (with **Try again**) and empty states are shown explicitly. The data loads when you open the tab and reloads after a History save or delete.
+
+**Data source and privacy boundary.** The tab calls `GET /api/analytics`, a read-only route. It needs a session, like History, and reads the signed-in user's records with the same ownership rule (`WHERE browser_id = <session user ID>`). It never takes a user ID from the query, headers or body. It returns only the per-analysis summary columns: creation time, analysis type, duration, window count, flagged count and share, model name, and threshold. It returns no record IDs, per-window scores, posture numbers, video, keypoints or file names. Nothing is computed or stored outside the user's browser and this Worker, and there's no analytics tracking or third-party service. Multi-person results aren't saved to History, so they aren't included.
+
+**Limits.** History keeps only each user's newest 100 analyses, and deleted analyses are gone. The tab always says this, and shows a warning once you reach the limit, so the figures aren't read as lifetime totals. Times are grouped by your browser's local time zone.
+
+**What the numbers aren't.** A flagged window is a movement deviation from the model's reference data, above the stored threshold. These scores are **not** measures of fatigue, workload, injury risk or safety, and the tab says so in every state.
+
+| Route | Purpose |
+| --- | --- |
+| `GET /api/analytics` | your saved analyses' summary columns (at most 100, oldest first), plus `retention_limit` |
 
 ## Version 1 limitations shown in the app
 
@@ -126,7 +148,7 @@ If the Render service is still on the old code, the jump-to-moment times will be
 ```powershell
 python -m pytest 02_model_server/test_window_starts.py -q            # API window start times
 cd 03_app; npm run build                                             # typecheck app + Worker, build
-npm test                                                             # D1 history: migration, routes, scoping, failures
+npm test                                                             # D1 history + analytics: migration, routes, scoping, failures, UI states
 npm run db:migrate:local; npm run dev   # then, in another terminal:
 node tools/e2e_video_flow.mjs --url http://127.0.0.1:5173 --videos "<videos dir>" --clips "4.03.49,4.03.52"
 node tools/e2e_video_flow.mjs --url http://127.0.0.1:5173 --videos "<videos dir>" --clips "4.03.49" --fail-save 1
@@ -137,7 +159,8 @@ node tools/e2e_video_flow.mjs --url http://127.0.0.1:5173 --videos "<videos dir>
 - save, list, load and delete, including limits, validation, and rejection of raw-data fields;
 - login: every history and analysis route needs a valid session, users only see their own records, client-sent IDs are ignored, and logging out ends the session;
 - the analysis route still working when history storage fails;
-- the app's history client: it sends the session cookie and no browser ID, and reports a failed or logged-out save rather than throwing.
+- the app's history client: it sends the session cookie and no browser ID, and reports a failed or logged-out save rather than throwing;
+- analytics (`test/analytics*.test.mjs`): the calculations (totals, window-weighted shares, day/week/month periods with gaps, type breakdown, retention-limit and mixed-scoring notices, the text summary); `/api/analytics` (login required, own records only, client-sent IDs ignored, summary fields only, at most 100 records, read-only, storage errors); and the tab's loading, error, empty, ready and at-limit states, rendered with React's server renderer after esbuild bundles the component into `node_modules/.cache`.
 
 `better-sqlite3` (a dev dependency, used only by `auth.config.ts` for Better Auth schema generation) is pinned to 12.x, which installs a prebuilt binary. Version 13 compiles from source on install and fails without a C++ toolchain.
 
