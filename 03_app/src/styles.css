@@ -10,8 +10,10 @@
   --glow-inset: inset 0 -9px 24px rgb(246 112 20 / 0.16);
   --card-bg: linear-gradient(180deg, rgb(255 255 255 / 0.035), rgb(255 255 255 / 0.012)), #0c0f15;
   --field-bg: rgb(33 33 33 / 0.3); --field-border: rgb(247 114 24 / 0.18);
-  --font-head: "Mulish Variable", "Mulish", system-ui, sans-serif;
-  --font-body: "Inter Variable", "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  /* Fonts: change one line to swap either face (bundled in main.tsx). */
+  --font-display: "Michroma", system-ui, sans-serif;
+  --font-body: "Jost", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-head: var(--font-display);
   --spring: cubic-bezier(0.175, 0.885, 0.32, 1.275); --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
   color-scheme: dark;
 }
@@ -702,6 +704,81 @@ main.landing {
   .auth-back { animation: ma-rise 0.8s var(--ease-out) both; }
 }
 
+/* =====================================================================================
+   Fonts: Michroma for page and section titles, Jost for everything else.
+   Michroma is wide, so titles are about 22% smaller than before. Jost ships in 300/400/500
+   only; font-synthesis: none makes any older 600/700 rule use the real 500 face instead of a
+   fake bold.
+   ===================================================================================== */
+html { font-synthesis: none; }
+body { font-family: var(--font-body); font-weight: 300; font-size: 15px; color: var(--ink); }
+button, input, select, textarea { font-family: var(--font-body); }
+
+/* Titles */
+h1, h2, h3, h4, legend, .card-title, .planner-title, .threshold-title {
+  font-family: var(--font-display); font-weight: 400; letter-spacing: 0.01em; line-height: 1.35;
+  text-wrap: balance; overflow-wrap: break-word;
+}
+h1 { font-size: 1.25rem; }
+h2 { font-size: 0.98rem; }
+h3, .planner-title { font-size: 1.05rem; }
+.draft-head h3, .review h3, .auth-card h2 { font-size: 0.86rem; }
+h4, .card-title, .limits-card h3, .day-editor-head h4, .threshold-title { font-size: 0.8rem; }
+legend, .field-group legend { font-size: 0.8rem; }
+.review-optional { font-family: var(--font-body); font-size: 0.85rem; letter-spacing: 0; }
+h2 .pill, .card-title + .card-sub { font-family: var(--font-body); }
+
+/* Body text: Jost 300, at least 15px, brightest text colour */
+p, li, td, .card-sub, .planner-intro p, .review > p.muted, .limits-card ul, .basis-box, .note-warn, .review-status,
+.multi-note, .track-warnings, .identity, .check, .app-tagline, .threshold-help, .switch-note {
+  font-weight: 300;
+}
+.planner-intro p, .review > p.muted, .limits-card ul, .basis-box, .note-warn, .review-status, .multi-note,
+.track-warnings, .identity, .check, .app-tagline, .error-box, .warning, .review-empty {
+  font-size: 15px;
+}
+.planner-intro p, .review > p.muted, .limits-card ul, .app-tagline, .basis-box .muted { color: var(--ink); }
+
+/* Small text (under 14px): weight 400, never 300 */
+.field, .field-note, .tag, .pill, .eyebrow, .tile-label, .tile .muted, .legend, .tooltip, .rule-hint, .context-line,
+.unit, .week-day-meta, .recorder-note, .trained-tick-label, .card-sub, .basis-badge, .block-why, .overlay-note,
+.day-editor-head p, .review-confirm p, .review-add span, .track-chip-text, .chip, .threshold-help, .switch-note,
+.landing-tagline, .auth-card label, .auth-card [role="alert"], .history-open, .timeline .axis, .timeline .marker {
+  font-weight: 400;
+}
+.threshold-help, .switch-note { font-size: 0.85rem; }
+
+/* Buttons, tabs and emphasised text: weight 500 */
+button, .button, .button-secondary, .button-cta, .tab, .segment, .chip, .switch, strong, b, th,
+.eyebrow, .tile-label, .tag, .pill, .basis-badge, .history-date, .week-day-name, .block-why span,
+.timeline .threshold-label {
+  font-weight: 500;
+}
+
+/* Numbers, times and durations: Jost 500 with tabular figures */
+.tile-value, .tile-of, .posture dd, .block-time, .history-open, .week-day-meta, .threshold-summary, .threshold-number input,
+.moments button, .stretch-chip, .uncertain-list button, .table-scroll table, .recorder-badge, .timeline .axis,
+.trained-tick-label, input[type="time"], input[type="number"], .unit {
+  font-family: var(--font-body); font-variant-numeric: tabular-nums;
+}
+.tile-value, .posture dd, .block-time, .threshold-summary, .recorder-badge, .stretch-chip, .moments button,
+.uncertain-list button, input[type="time"], input[type="number"] {
+  font-weight: 500;
+}
+
+@media (max-width: 480px) {
+  h1 { font-size: 1.1rem; }
+  h3, .planner-title { font-size: 0.95rem; }
+}
+
+/* ---------- Landing page: decorative background video ---------- */
+.landing-video {
+  position: absolute; inset: 0; z-index: -4; width: 100%; height: 100%;
+  object-fit: cover; object-position: center; pointer-events: none;
+}
+/* Page background colour at about 35% over the video, so the content stays easy to read */
+.landing-video-overlay { position: absolute; inset: 0; z-index: -3; pointer-events: none; background: rgb(6 9 16 / 0.35); }
+
 /* ---------- Analytics tab ---------- */
 .analytics { margin-top: 16px; }
 .analytics h3 { margin: 0 0 4px; font-size: 1rem; color: var(--ink); }
@@ -732,3 +809,9 @@ main.landing {
 .analytics-table { overflow-x: auto; }
 /* Model tab: 3D evaluation graphs (public/graphs) */
 .model-eval iframe { display: block; width: 100%; border: 0; background: transparent; }
+
+/* Four tabs (Analysis, Schedule, Analytics, Model) share the width on phones instead of being cut off */
+@media (max-width: 600px) {
+  .tabs { width: 100%; }
+  .tab { flex: 1 1 0; min-width: 0; padding: 8px 4px; font-size: 0.88rem; white-space: nowrap; }
+}
