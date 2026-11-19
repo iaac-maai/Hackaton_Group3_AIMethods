@@ -1,6 +1,8 @@
 
 import { authClient } from "./auth-client";
 import { AuthScreen } from "./AuthScreen";
+import { Landing } from "./Landing";
+import logo from "./assets/motion-atlas-logo-compact.png";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { analyzeKeypoints, wakeModelServer, type KeypointResult, type ScoredWindow } from "./api";
 import { HistoryPanel, type HistoryState } from "./components/HistoryPanel";
@@ -249,8 +251,7 @@ function AppContent() {
       <header className="app-header">
         <div className="app-header-glow" aria-hidden="true" />
         <div className="brand">
-          <span className="brand-mark" aria-hidden="true" />
-          <h1>Motion Atlas</h1>
+          <h1><img className="brand-logo" src={logo} alt="Motion Atlas" width={1281} height={303} /></h1>
         </div>
 
         <button
@@ -544,13 +545,14 @@ function Diagnostics({ extraction: r, quality, backend, fileName }: { extraction
 
 export default function App() {
   const { data: session, isPending } = authClient.useSession();
+  const [showLogin, setShowLogin] = useState(false);
 
   if (isPending) {
     return <p>Checking login...</p>;
   }
 
   if (!session) {
-    return <AuthScreen />;
+    return showLogin ? <AuthScreen onBack={() => setShowLogin(false)} /> : <Landing onLogin={() => setShowLogin(true)} />;
   }
 
   return <AppContent />;
