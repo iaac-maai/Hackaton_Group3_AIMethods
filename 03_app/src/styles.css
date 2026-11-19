@@ -730,3 +730,5 @@ main.landing {
 .analytics table { border-collapse: collapse; font-variant-numeric: tabular-nums; font-size: 0.9rem; }
 .analytics th, .analytics td { text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--line); }
 .analytics-table { overflow-x: auto; }
+/* Model tab: 3D evaluation graphs (public/graphs) */
+.model-eval iframe { display: block; width: 100%; border: 0; background: transparent; }
