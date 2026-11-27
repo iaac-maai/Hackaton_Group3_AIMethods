@@ -1,0 +1,57 @@
+{
+  "model_file": "models/keypoint/model.onnx",
+  "model_sha256": "67fc95518e462c0603c0fec1a36648f5a77b5b779a9004c5f657d0c9d1c103cd",
+  "scaler_sha256": "03b083f0ed6e9fd1537fd3823664c260a4208bbd3923e7f01870e86daf25d303",
+  "scaler_matches_rebuilt_training_scaler": true,
+  "pmin": 0.02,
+  "windows": {
+    "train": 1473,
+    "validation": 225,
+    "test": 396,
+    "test_reference": 148,
+    "test_comparison": 248
+  },
+  "validation_mse_mean": 0.20788539946079254,
+  "test_mse_mean": 0.4319935739040375,
+  "test_roc_auc": 0.7838927637314734,
+  "validation_p90_recomputed": {
+    "threshold": 0.6588427424430847,
+    "precision": 0.8455284552845529,
+    "recall": 0.41935483870967744,
+    "f1": 0.5606469002695418,
+    "confusion": {
+      "tn": 129,
+      "fp": 19,
+      "fn": 144,
+      "tp": 104
+    }
+  },
+  "deployed_config_threshold": {
+    "threshold": 0.6588426828384399,
+    "precision": 0.8455284552845529,
+    "recall": 0.41935483870967744,
+    "f1": 0.5606469002695418,
+    "confusion": {
+      "tn": 129,
+      "fp": 19,
+      "fn": 144,
+      "tp": 104
+    }
+  },
+  "reference_methods_recomputed": {
+    "Reference: PCA, 8 components": {
+      "validation_mse_mean": 0.26696908473968506,
+      "test_roc_auc": 0.7657748474280732,
+      "threshold": 1.025894284248352,
+      "precision": 0.23809523809523808,
+      "recall": 0.020161290322580645
+    },
+    "Reference: pose deviation": {
+      "validation_mse_mean": null,
+      "test_roc_auc": 0.8429054054054055,
+      "threshold": 1.8396058082580566,
+      "precision": 0.8907103825136612,
+      "recall": 0.657258064516129
+    }
+  }
+}

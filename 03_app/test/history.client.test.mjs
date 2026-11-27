@@ -1,6 +1,6 @@
 // App-side history helpers: what is sent when saving, that requests carry the login session (and no
 // browser-generated ID), and that a failed save is reported as a value (so the analysis that was just
-// shown stays on screen). Ownership is decided by the Worker from the Better Auth session.
+// shown stays on screen). Ownership is decided by the Worker after its login check (one shared History).
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { deleteHistory, listHistory, loadHistory, persistAnalysis, toSaveRequest } from "../src/history.ts";

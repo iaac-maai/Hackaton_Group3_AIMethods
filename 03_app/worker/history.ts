@@ -2,9 +2,17 @@
 import type { D1Database } from "@cloudflare/workers-types";
 
 // Saved analysis history in D1.
-// History ownership is determined by the authenticated Better Auth user ID.
-// The existing browser_id database column is reused to store that user ID.
+// Every row has an owner in the browser_id column (the name predates logins), and every query is
+// scoped to one owner. The Worker passes the owner after its own login check, never from the request.
+//
+// With the shared team password there is one owner, SHARED_HISTORY_OWNER: everyone who logs in sees,
+// opens and deletes the same History. Rows saved earlier under other owners (Better Auth user IDs, or
+// random browser IDs from before logins) are kept in D1 but are not listed, opened, deleted or pruned
+// by these routes. See the app README ("History is shared") for how to adopt them, if wanted.
 // Never trust a browser-supplied ID for access control.
+
+/** The single History owner for everyone who logs in with the shared team password. */
+export const SHARED_HISTORY_OWNER = "shared-team";
 
 export interface HistoryEnv {
   DB?: D1Database;
@@ -14,7 +22,7 @@ export const LIST_DEFAULT = 20;
 export const LIST_MAX = 50;
 export const MAX_WINDOWS = 2000;
 export const MAX_SAVE_BYTES = 256 * 1024;
-export const MAX_RECORDS_PER_USER = 100;
+export const MAX_RECORDS_PER_OWNER = 100;
 
 const MAX_DURATION_S = 6 * 60 * 60;
 const MAX_SUMMARY_KEYS = 20;
@@ -368,18 +376,18 @@ async function readLimited(
 }
 
 /**
- * Handle history requests for an authenticated user.
+ * Handle history requests for one owner, after the Worker has checked the login session.
  *
- * userId MUST come from the server-verified Better Auth session.
- * Never accept userId from headers, query parameters, or request bodies.
+ * ownerId MUST be chosen by the Worker (today always SHARED_HISTORY_OWNER).
+ * Never accept ownerId from headers, query parameters, or request bodies.
  */
 export async function handleHistory(
   request: Request,
   env: HistoryEnv,
   pathname: string,
-  userId: string
+  ownerId: string
 ): Promise<Response> {
-  if (!userId || typeof userId !== "string") {
+  if (!ownerId || typeof ownerId !== "string") {
     return json(401, {
       detail: "Please log in to use Motion Atlas.",
     });
@@ -438,20 +446,20 @@ export async function handleHistory(
     if (recordId === null && method === "GET") {
       return await list(
         db,
-        userId,
+        ownerId,
         new URL(request.url).searchParams.get("limit")
       );
     }
 
     if (recordId === null) {
-      return await save(db, userId, request);
+      return await save(db, ownerId, request);
     }
 
     if (method === "GET") {
-      return await load(db, userId, recordId);
+      return await load(db, ownerId, recordId);
     }
 
-    return await remove(db, userId, recordId);
+    return await remove(db, ownerId, recordId);
   } catch (err) {
     console.error("history storage error", err);
 
@@ -464,7 +472,7 @@ export async function handleHistory(
 
 async function list(
   db: D1Database,
-  userId: string,
+  ownerId: string,
   rawLimit: string | null
 ): Promise<Response> {
   let limit = LIST_DEFAULT;
@@ -491,7 +499,7 @@ async function list(
        ORDER BY created_at DESC, id DESC
        LIMIT ?2`
     )
-    .bind(userId, limit)
+    .bind(ownerId, limit)
     .all<ListRow>();
 
   return json(200, {
@@ -502,7 +510,7 @@ async function list(
 
 async function save(
   db: D1Database,
-  userId: string,
+  ownerId: string,
   request: Request
 ): Promise<Response> {
   if (
@@ -595,7 +603,7 @@ async function save(
       )
       .bind(
         row.id,
-        userId,
+        ownerId,
         row.created_at,
         row.analysis_type,
         row.model,
@@ -620,7 +628,7 @@ async function save(
            LIMIT ?2
          )`
       )
-      .bind(userId, MAX_RECORDS_PER_USER),
+      .bind(ownerId, MAX_RECORDS_PER_OWNER),
   ]);
 
   return json(201, listItem(row));
@@ -628,7 +636,7 @@ async function save(
 
 async function load(
   db: D1Database,
-  userId: string,
+  ownerId: string,
   id: string
 ): Promise<Response> {
   const row = await db
@@ -639,7 +647,7 @@ async function load(
        FROM analysis_history
        WHERE id = ?1 AND browser_id = ?2`
     )
-    .bind(id, userId)
+    .bind(id, ownerId)
     .first<FullRow>();
 
   if (!row) {
@@ -654,7 +662,7 @@ async function load(
 
 async function remove(
   db: D1Database,
-  userId: string,
+  ownerId: string,
   id: string
 ): Promise<Response> {
   const result = await db
@@ -662,7 +670,7 @@ async function remove(
       `DELETE FROM analysis_history
        WHERE id = ?1 AND browser_id = ?2`
     )
-    .bind(id, userId)
+    .bind(id, ownerId)
     .run();
 
   if (!result.meta.changes) {

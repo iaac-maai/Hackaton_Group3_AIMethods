@@ -1,6 +1,6 @@
 import type { HistoryItem } from "../history";
 
-// Recent saved analyses for the logged-in account. Selecting a row restores its summary and timeline.
+// Recent saved analyses in the team's shared History. Selecting a row restores its summary and timeline.
 
 export type HistoryState =
   | { kind: "loading" }
@@ -24,8 +24,9 @@ export function HistoryPanel({ state, selectedId, busyId, actionError, onSelect,
     <section className="history" id="history" aria-labelledby="history-title">
       <h2 id="history-title">History</h2>
       <p className="muted">
-        Recent analyses saved to your account (summaries and window scores only, no video or keypoints). Only you can see
-        them, on any device where you’re logged in. This is a prototype, so don’t analyse confidential footage.
+        Recent analyses in the team’s shared History (summaries and window scores only, no video or keypoints).
+        Everyone who logs in with the team password can see, open and delete them. This is a prototype, so don’t
+        analyse confidential footage.
       </p>
       {state.kind === "loading" && <p role="status">Loading saved analyses…</p>}
       {state.kind === "error" && (

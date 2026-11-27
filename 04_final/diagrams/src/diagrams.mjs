@@ -8,48 +8,66 @@ import {
 // 1. System architecture
 // ---------------------------------------------------------------------------------------------
 function systemArchitecture() {
-  const B = { x: 72, w: 500 }, Wk = { x: 732, w: 500 }, R = { x: 1392, w: 456 };
+  // Columns: browser | shared-password gate (run by the Worker first) | Worker routes | Hugging Face, Render and D1.
+  const B = { x: 72, w: 470 }, G = { x: 552, w: 182 }, Wk = { x: 744, w: 486 }, R = { x: 1392, w: 456 };
   const bx = B.x + 24, bw = B.w - 48, wx = Wk.x + 24, ww = Wk.w - 48;
   const gapL = [bx + bw, wx], gapR = [wx + ww, R.x];
-  const midL = (gapL[0] + gapL[1]) / 2, midR = (gapR[0] + gapR[1]) / 2;
+  const midL = G.x + G.w / 2, midR = (gapR[0] + gapR[1]) / 2;
+  const GATE_FILL = "#13111f";   // opaque, so arrow labels on the gate get a matching halo
+  const gl = { halo: GATE_FILL };
   // Architecture block, laid out from y = 210 and shifted down by ARCH_DY to sit below the summary row.
   const ARCH_DY = 74;
   const arch = [
     zone({ x: B.x, y: 210, w: B.w, h: 712, kicker: "User’s device", title: "Browser · Motion Atlas app" }),
     pill(B.x + B.w - 24, 230, "Video never uploaded", { tone: "privacy", anchor: "end" }),
-    node({ x: bx, y: 316, w: bw, h: 100, title: "Log in or sign up", body: ["Email and password", "Session kept as an HttpOnly cookie"] }),
-    node({ x: bx, y: 436, w: bw, h: 166, title: "Video → pose keypoints", tone: "privacy", body: [
-      "Upload a video or record one", "MoveNet runs in the browser (TF.js)", "One person, or several as tracks A, B, C", "25 fps · 17 keypoints per pose"] }),
-    node({ x: bx, y: 622, w: bw, h: 128, title: "Results", body: ["Score timeline and threshold", "Flagged moments with start–end times", "Local playback with skeleton"] }),
-    node({ x: bx, y: 770, w: bw, h: 132, title: "History panel", body: ["Your saved analyses (newest 20)", "Open one to see its scores again", "Optional replay from a local file"] }),
+    node({ x: bx, y: 316, w: bw, h: 96, title: "Log in", body: ["One shared team password", "Session kept as an HttpOnly cookie"] }),
+    node({ x: bx, y: 428, w: bw, h: 248, title: "Video → pose keypoints", tone: "privacy", body: [
+      "Upload a video or record one", "MoveNet runs in the browser (TF.js)", "One person, or several as tracks A, B, C", "25 fps · 17 keypoints per pose",
+      "Picking a video wakes the model server"] }),
+    node({ x: bx, y: 692, w: bw, h: 100, title: "Results", body: ["Scores, threshold and flagged moments", "Local playback with skeleton"] }),
+    node({ x: bx, y: 808, w: bw, h: 94, title: "History panel", body: ["Team’s shared History (newest 20)", "Open one again · optional local replay"] }),
+
+    // The Worker's shared-password gate runs first for every request (assets.run_worker_first).
+    rect(G.x, 210, G.w, 712, { r: 20, fill: GATE_FILL, stroke: T.custom, so: 0.5 }),
+    eyebrow(G.x + 20, 248, "Worker · first", { fill: T.custom }),
+    text(G.x + 20, 280, "Password gate", { size: 19, weight: 800, font: HEAD, fill: T.ink }),
+    text(G.x + 20, 306, "All but /api/health", { size: 15, fill: T.ink2 }),
 
     zone({ x: Wk.x, y: 210, w: Wk.w, h: 712, kicker: "Cloudflare", title: "Worker · motion-atlas" }),
     pill(Wk.x + Wk.w - 24, 230, "Serves the app + /api", { anchor: "end" }),
-    node({ x: wx, y: 316, w: ww, h: 100, title: "Better Auth · /api/auth/*", body: ["Sign up, log in, log out", "Creates and ends sessions"] }),
-    node({ x: wx, y: 436, w: ww, h: 128, title: "Session check", tone: "protected", body: [
-      "Required for analysis and History", "User ID taken from the session only", "No session → 401 “Please log in”"] }),
-    node({ x: wx, y: 584, w: ww, h: 112, title: "POST /api/analyze/keypoints", tone: "protected", body: ["Forwards keypoints to Render", "Returns its response unchanged"] }),
-    node({ x: wx, y: 716, w: ww, h: 186, title: "/api/history", tone: "protected", body: [
-      "List · save · open · delete", "Only the session user’s records", "Accepts summary fields only", "Keeps the newest 100 per user"] }),
+    node({ x: wx, y: 316, w: ww, h: 96, title: "POST /api/login · /api/logout", body: ["Checks the APP_PASSWORD secret", "Creates and ends 12 h sessions"] }),
+    node({ x: wx, y: 428, w: ww, h: 124, title: "Session check", tone: "protected", body: [
+      "App, analysis, History, Analytics", "Token hash looked up in D1", "None → login page or 401"] }),
+    node({ x: wx, y: 568, w: ww, h: 76, title: "GET /api/health", body: ["No session needed · forwards to Render"] }),
+    node({ x: wx, y: 660, w: ww, h: 96, title: "POST /api/analyze/keypoints", tone: "protected", body: ["Forwards keypoints to Render", "Returns its response unchanged"] }),
+    node({ x: wx, y: 772, w: ww, h: 130, title: "/api/history", tone: "protected", body: [
+      "List · save · open · delete", "Shared History · summary fields only", "Keeps the newest 100"] }),
 
-    node({ x: R.x, y: 316, w: R.w, h: 128, kicker: "Cloudflare D1", title: "Accounts and sessions", body: ["user · session · account · verification"] }),
-    node({ x: R.x, y: 520, w: R.w, h: 210, kicker: "Render", title: "Scoring API", body: [
-      "POST /predict/keypoints", "Keypoint autoencoder (ONNX)", "Scores each 1.92 s window: movement", "deviation from the model’s reference data"] }),
-    node({ x: R.x, y: 762, w: R.w, h: 140, kicker: "Cloudflare D1", title: "analysis_history", body: ["Summaries and per-window scores", "Owner = session user ID"] }),
+    node({ x: R.x, y: 316, w: R.w, h: 104, kicker: "Cloudflare D1", title: "app_session", body: ["Token hash + expiry · no personal data"] }),
+    node({ x: R.x, y: 436, w: R.w, h: 96, kicker: "Hugging Face", title: "Model repo", body: ["model.onnx · scaler.npz · config.json"] }),
+    node({ x: R.x, y: 596, w: R.w, h: 150, kicker: "Render", title: "Model server (FastAPI)", body: [
+      "GET /health loads the models", "POST /predict/keypoints → ONNX autoencoder", "1.92 s windows · deviation from reference"] }),
+    node({ x: R.x, y: 772, w: R.w, h: 130, kicker: "Cloudflare D1", title: "analysis_history", body: ["Summaries and per-window scores", "Owner = shared-team (one History)"] }),
 
-    // Browser ↔ Worker
-    arrow([[gapL[0] + 4, 352], [gapL[1] - 4, 352]], { label: "email + password", at: [midL, 342] }),
-    arrow([[gapL[1] - 4, 392], [gapL[0] + 4, 392]], { style: "res", label: "session cookie", at: [midL, 382] }),
-    arrow([[gapL[0] + 4, 594], [gapL[1] - 4, 594]], { label: "keypoints + cookie", at: [midL, 584] }),
-    arrow([[gapL[1] - 4, 680], [gapL[0] + 4, 680]], { style: "res", label: "scores, flags, times", at: [midL, 670] }),
-    arrow([[gapL[0] + 4, 740], [gapL[1] - 4, 740]], { label: "summary + scores", at: [midL, 730] }),
-    arrow([[gapL[1] - 4, 846], [gapL[0] + 4, 846]], { style: "res", label: "saved items", at: [midL, 836] }),
+    // Browser ↔ Worker, through the password gate
+    arrow([[gapL[0] + 4, 352], [gapL[1] - 4, 352]], { label: "team password", at: [midL, 342], ...gl }),
+    arrow([[gapL[1] - 4, 392], [gapL[0] + 4, 392]], { style: "res", label: "session cookie", at: [midL, 382], ...gl }),
+    arrow([[gapL[0] + 4, 600], [gapL[1] - 4, 600]], { label: "GET /api/health", at: [midL, 590], ...gl }),
+    text(midL, 622, "wake-up, reply ignored", { size: 15, fill: T.muted, anchor: "middle", halo: GATE_FILL }),
+    arrow([[gapL[0] + 4, 668], [gapL[1] - 4, 668]], { label: "keypoints + cookie", at: [midL, 658], ...gl }),
+    arrow([[gapL[1] - 4, 740], [gapL[0] + 4, 740]], { style: "res", label: "scores, flags, times", at: [midL, 730], ...gl }),
+    arrow([[gapL[0] + 4, 830], [gapL[1] - 4, 830]], { label: "summary + scores", at: [midL, 820], ...gl }),
+    arrow([[gapL[1] - 4, 880], [gapL[0] + 4, 880]], { style: "res", label: "saved items", at: [midL, 870], ...gl }),
     // Worker ↔ Render / D1
-    arrow([[gapR[0] + 4, 366], [gapR[1] - 4, 366]], { label: "users, sessions", at: [midR, 356] }),
-    arrow([[gapR[0] + 4, 484], [R.x + 60, 484], [R.x + 60, 444 + 4]], { label: "look up session", at: [gapR[0] + 16, 474], anchor: "start" }),
-    arrow([[gapR[0] + 4, 614], [gapR[1] - 4, 614]], { label: "keypoints", at: [midR, 604] }),
-    arrow([[gapR[1] - 4, 668], [gapR[0] + 4, 668]], { style: "res", label: "scores, flags, times", at: [midR, 658] }),
-    arrow([[gapR[0] + 4, 822], [gapR[1] - 4, 822]], { label: "own rows only", at: [midR, 812] }),
+    arrow([[gapR[0] + 4, 352], [gapR[1] - 4, 352]], { label: "session hash", at: [midR, 342] }),
+    arrow([[gapR[0] + 4, 476], [R.x - 28, 476], [R.x - 28, 404], [R.x - 4, 404]], { label: "look up session", at: [gapR[0] + 14, 466], anchor: "start" }),
+    arrow([[gapR[0] + 4, 606], [gapR[1] - 4, 606]], { label: "GET /health", at: [midR, 596] }),
+    arrow([[gapR[0] + 4, 680], [gapR[1] - 4, 680]], { label: "keypoints", at: [midR, 670] }),
+    arrow([[gapR[1] - 4, 730], [gapR[0] + 4, 730]], { style: "res", label: "scores, flags, times", at: [midR, 720] }),
+    arrow([[gapR[0] + 4, 830], [gapR[1] - 4, 830]], { label: "shared rows only", at: [midR, 820] }),
+    // Hugging Face → Render: model files fetched with snapshot_download on the first model load
+    arrow([[R.x + 56, 532 + 4], [R.x + 56, 596 - 4]], { label: "snapshot_download", at: [R.x + 76, 558], anchor: "start" }),
+    text(R.x + 76, 581, "first model load at start-up, then cached", { size: 15, fill: T.muted, halo: T.page }),
   ];
   const body = [
     // What crosses the boundary: summary row below the subtitle
@@ -57,7 +75,7 @@ function systemArchitecture() {
     ...[
       ["Stays in the browser", "Video, camera recordings, skeleton overlay", "privacy"],
       ["Sent to the Worker", "Keypoints to score · summaries to save", "default"],
-      ["Stored in D1", "Accounts, sessions, summaries · never video or keypoints", "default"],
+      ["Stored in D1", "Session hashes, summaries · never video or keypoints", "default"],
     ].map(([k, v, tone], i) => node({ x: 72 + i * 600, y: 184, w: 576, h: 78, kicker: k, body: [v], tone })),
     `</g>`,
     `<g id="architecture" transform="translate(0 ${ARCH_DY})">`, ...arch, `</g>`,
@@ -65,9 +83,9 @@ function systemArchitecture() {
   return page({
     num: "01 System architecture",
     title: "System architecture",
-    subtitle: "The video stays on the device. Only pose keypoints and score summaries cross the network, and only for a logged-in user.",
-    legendItems: legendWithout("key", "warn", "decision"),
-    footnote: "Source: 03_app/worker, 03_app/src, 02_model_server/app.py",
+    subtitle: "The video stays on the device. One team password gates the app; keypoints and summaries are sent only with a valid session.",
+    legendItems: [...legendWithout("key", "warn", "decision"), { box: "gate", label: "Shared-password gate (in the Worker)" }],
+    footnote: "Source: 03_app/worker (index.ts, gate.ts), 03_app/src, 02_model_server/app.py, model_loader.py",
     body: body.join("\n"),
   });
 }
@@ -101,17 +119,17 @@ function supervisorFlow() {
     text(94, 262, "“As a site lead, I want a simple overview of analyzed clips and unusual movement windows, so I can decide what deserves review.”",
       { size: 22, weight: 600, font: HEAD, fill: T.ink }),
 
-    eyebrow(72, 336, "1 · Sign in"), eyebrow(452, 336, "2 · Analyze a clip"), eyebrow(C3.x, 336, "3 · Overview and review"),
+    eyebrow(72, 336, "1 · Log in"), eyebrow(452, 336, "2 · Analyze a clip"), eyebrow(C3.x, 336, "3 · Overview and review"),
 
-    // Column 1: sign in
+    // Column 1: log in with the shared team password
     node({ x: 97, y: 362, w: 250, h: 64, r: 32, tone: "start", title: "Open Motion Atlas", center: true, titleSize: 20 }),
     arrow([[222, 426], [222, 456]]),
     diamond(222, 518, 220, 120, ["Logged in?"]),
     arrow([[222, 578], [222, 634]], { label: "No", at: [236, 612], anchor: "start" }),
-    node({ x: 72, y: 638, w: 300, h: 108, title: "Log in or sign up", body: ["Email and password", "Sets the session cookie"] }),
+    node({ x: 72, y: 638, w: 300, h: 108, title: "Log in", body: ["Shared team password", "Sets the session cookie"] }),
     arrow([[332, 518], [566, 518]], { label: "Yes", at: [352, 506], anchor: "start" }),
     `<path d="M372,692 H412 V518" fill="none" stroke="${T.ink2}" stroke-width="2"/>`, dot(412, 518),
-    node({ x: 72, y: 778, w: 300, h: 112, tone: "ghost", title: "Login required", titleSize: 19, body: ["Analysis and History answer", "401 “Please log in” without one"] }),
+    node({ x: 72, y: 778, w: 300, h: 112, tone: "ghost", title: "Login required", titleSize: 19, body: ["Login page instead of the app;", "the API answers 401 without one"] }),
 
     // Column 2: analyze
     node({ x: 572, y: 466, w: 360, h: 104, title: "Choose a clip", tone: "privacy", body: ["Upload a video or record one", "Pose found in the browser"] }),
@@ -140,7 +158,7 @@ function supervisorFlow() {
     pill(C3.x + C3.w - 22, 376, "example rows", { anchor: "end", size: 13 }),
     historyRow(C3.x + 26, 412, C3.w - 48, "19 Nov, 14:05", "42.2 s", "4 of 22 windows flagged (18%)"),
     historyRow(C3.x + 26, 458, C3.w - 48, "19 Nov, 11:40", "18.6 s", "0 of 9 windows flagged (0%)"),
-    text(C3.x + 26, 524, "Newest 20 for this account · summaries only, no video", { size: 16, fill: T.muted }),
+    text(C3.x + 26, 524, "Newest 20 in the team’s shared History · summaries only", { size: 16, fill: T.muted }),
     arrow([[C3.x + 60, 544], [C3.x + 60, 580]], { style: "key", label: "Open a clip", at: [C3.x + 76, 568], anchor: "start" }),
     node({ x: C3.x, y: 582, w: C3.w, h: 124, tone: "key", title: "Flagged time windows", body: ["Start–end times from the scoring API"] }),
     pill(C3.x + 26, 658, "▶ 0:11.5–0:13.4", { size: 15 }), text(C3.x + 186, 678, "score 0.41", { size: 15, fill: T.muted }),
@@ -189,7 +207,7 @@ function analysisAndSave() {
 
     divider(72, 690, 1328, "Save to History · automatic, separate from the analysis"),
     msg(Bx, Wx, 726, "POST /api/history", { label2: "summary + window scores only" }),
-    note(Wx, 738, ["Verify session", "Owner = session user ID"], "protected"),
+    note(Wx, 738, ["Verify session", "Owner = shared-team"], "protected"),
     msg(Wx, Dx, 832, "Insert row · keep newest 100"),
     frag(72, 850, 1328, 176, [
       { y: 850, guard: "[saved]", tone: "ok" },
@@ -254,8 +272,8 @@ function reopenSaved() {
 
     divider(72, 274, 1078, "Load the overview · when the app opens"),
     msg(Bx, Wx, 314, "GET /api/history?limit=20", { label2: "session cookie" }),
-    note(Wx, 326, ["Verify session", "Owner = session user ID"], "protected"),
-    msg(Wx, Dx, 440, "newest 20 rows of this user"),
+    note(Wx, 326, ["Verify session", "Owner = shared-team"], "protected"),
+    msg(Wx, Dx, 440, "newest 20 shared rows"),
     msg(Dx, Wx, 480, "rows", { style: "res" }),
     msg(Wx, Bx, 520, "date · duration · flagged count", { style: "res" }),
     msg(Bx, L, 560, "History list", { style: "res" }),
@@ -266,7 +284,7 @@ function reopenSaved() {
     msg(Wx, Dx, 720, "row with this ID and owner"),
     frag(72, 740, 1078, 296, [
       { y: 740, guard: "[found]", tone: "ok" },
-      { y: 940, guard: "[not found, or another user’s record]", tone: "err" },
+      { y: 940, guard: "[not found, or not in the shared History]", tone: "err" },
     ]),
     msg(Dx, Wx, 774, "row", { style: "res" }),
     msg(Wx, Bx, 808, "200 · summary + window scores", { style: "res" }),
@@ -296,12 +314,12 @@ function reopenSaved() {
     eyebrow(P.x + 418, 848, "Never stored"),
     ...["Video", "Keypoints", "File names"]
       .map((s, i) => text(P.x + 418, 878 + i * 26, [["✕ ", { fill: T.err, weight: 700 }], [s, {}]], { size: 16, fill: T.ink2 })),
-    text(P.x + 22, 1016, "Each user keeps their newest 100 records.", { size: 15, fill: T.muted }),
+    text(P.x + 22, 1016, "The team’s shared History keeps the newest 100 records.", { size: 15, fill: T.muted }),
   ];
   return page({
     num: "04 Reopen a saved analysis",
     title: "Reopen a saved analysis",
-    subtitle: "History returns summaries and window scores for the logged-in user. Replaying a moment needs the original video on this device.",
+    subtitle: "History returns summaries and window scores from the team’s shared History. Replaying a moment needs the original video on this device.",
     legendItems: legendWithout("key"),
     footnote: "Source: 03_app/src/App.tsx, history.ts · 03_app/worker/history.ts",
     body: body.join("\n"),

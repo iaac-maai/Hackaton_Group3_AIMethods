@@ -1,7 +1,4 @@
 
-import { authClient } from "./auth-client";
-import { AuthScreen } from "./AuthScreen";
-import { Landing } from "./Landing";
 import logo from "./assets/motion-atlas-logo-compact.png";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { analyzeKeypoints, wakeModelServer, type KeypointResult, type ScoredWindow } from "./api";
@@ -262,31 +259,17 @@ function AppContent() {
           <h1><img className="brand-logo" src={logo} alt="Motion Atlas" width={1281} height={303} /></h1>
         </div>
 
-        <button
-          type="button"
-          className="button-secondary"
-          onClick={async () => {
-            try {
-              const result = await authClient.signOut();
-              if (result.error) {
-                window.alert(result.error.message ?? "Could not log out.");
-                return;
-              }
-              window.location.reload();
-            } catch {
-              window.alert("Could not log out. Please try again.");
-            }
-          }}
-        >
-          Log out
-        </button>
+        {/* Plain form post: the Worker ends the session, clears the cookie and shows the login page. */}
+        <form method="post" action="/api/logout" className="logout-form">
+          <button type="submit" className="button-secondary">Log out</button>
+        </form>
 
         <p className="app-tagline">
           {tab === "analysis"
             ? "Video movement analysis. Your video is processed in this browser and is never uploaded; only body keypoints are sent for scoring."
             : tab === "schedule"
               ? "Draft a shift plan with regular breaks. It stays on this page and isn’t saved or sent anywhere."
-                            : tab === "analytics" ? "Summaries and trends from your own saved History. Movement deviations only, not fatigue, workload, injury risk or safety." : "How the movement model was evaluated: drag any 3D graph to orbit it."}
+                            : tab === "analytics" ? "Summaries and trends from the team’s shared History. Movement deviations only, not fatigue, workload, injury risk or safety." : "How the movement model was evaluated: drag any 3D graph to orbit it."}
         </p>
                 <Tabs label="Motion Atlas sections" selected={tab} onSelect={(id) => setTab(id as "analysis" | "schedule" | "analytics" | "model")}
                     tabs={[{ id: "analysis", label: <>Analysis{activity && <span className="tab-activity">{activity}</span>}</> }, { id: "schedule", label: "Schedule" }, { id: "analytics", label: "Analytics" }, { id: "model", label: "Model" }]} />
@@ -560,17 +543,8 @@ function Diagnostics({ extraction: r, quality, backend, fileName }: { extraction
   );
 }
 
+// The Worker serves this app only to a browser with a valid session (the shared team password),
+// so there's no login state to check here. If the session ends, API calls answer 401 "Please log in".
 export default function App() {
-  const { data: session, isPending } = authClient.useSession();
-  const [showLogin, setShowLogin] = useState(false);
-
-  if (isPending) {
-    return <p>Checking login...</p>;
-  }
-
-  if (!session) {
-    return showLogin ? <AuthScreen onBack={() => setShowLogin(false)} /> : <Landing onLogin={() => setShowLogin(true)} />;
-  }
-
   return <AppContent />;
 }

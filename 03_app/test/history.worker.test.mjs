@@ -1,18 +1,28 @@
-// Worker history routes against a real local D1: save/list/load/delete, validation, per-user
-// scoping, payload limits, and that analysis keeps working when history storage is unavailable.
-// Users sign up through the Worker's own Better Auth routes (migrations 0001 + 0002 applied), and the
-// session cookie is the only thing that decides whose history a request sees. The user ID is stored
-// in the existing analysis_history.browser_id column.
+// Worker history routes against a real local D1: save/list/load/delete, validation, the shared
+// History (one owner for everyone with the team password), that rows saved under earlier per-user
+// owners stay hidden and untouched, payload limits, and that analysis keeps working when history
+// storage is unavailable. Sessions come from the Worker's own /api/login (all migrations applied).
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
-import { after, before, describe, test } from "node:test";
+import { after, before, beforeEach, describe, test } from "node:test";
 import worker from "../worker/index.ts";
-import { LIST_MAX, MAX_RECORDS_PER_USER, MAX_WINDOWS } from "../worker/history.ts";
+import { LIST_MAX, MAX_RECORDS_PER_OWNER, MAX_WINDOWS } from "../worker/history.ts";
 import { deleteHistory, listHistory, loadHistory, persistAnalysis } from "../src/history.ts";
-import { caller, localD1, sampleResult, sampleSave, signUp, TEST_AUTH_SECRET } from "./helpers.mjs";
+import { caller, clearSharedHistory, localD1, logIn, sampleResult, sampleSave, SHARED_OWNER, TEST_APP_PASSWORD } from "./helpers.mjs";
 
 let proxy, env, call, render, renderUrl;
-const newUser = () => signUp(worker, env);
+const newSession = () => logIn(worker, env);
+
+/** A row saved before the shared password, under a per-user owner (a Better Auth user ID). */
+async function insertLegacyRow(db, owner = crypto.randomUUID()) {
+  const id = crypto.randomUUID();
+  await db.prepare(
+    `INSERT INTO analysis_history (id, browser_id, created_at, analysis_type, model, duration_seconds, window_count,
+       flagged_count, flagged_percent, threshold, interpretation, summary_json, windows_json)
+     VALUES (?1, ?2, ?3, 'video', 'keypoint_autoencoder', 8.2, 1, 1, 100, 0.42, '', '{}', '[[1,0,1.92,0.7,1]]')`,
+  ).bind(id, owner, Date.now()).run();
+  return { id, owner };
+}
 
 before(async () => {
   proxy = await localD1();
@@ -26,14 +36,16 @@ before(async () => {
   });
   await new Promise((r) => render.listen(0, "127.0.0.1", r));
   renderUrl = `http://127.0.0.1:${render.address().port}`;
-  env = { DB: proxy.env.DB, ASSETS: { fetch: async () => new Response("app") }, RENDER_API_URL: renderUrl, BETTER_AUTH_SECRET: TEST_AUTH_SECRET };
+  env = { DB: proxy.env.DB, ASSETS: { fetch: async () => new Response("app") }, RENDER_API_URL: renderUrl, APP_PASSWORD: TEST_APP_PASSWORD };
   call = caller(worker, env);
 });
 after(async () => { await proxy?.dispose(); render?.close(); });
+// The History is shared by every session, so each test starts from an empty shared History.
+beforeEach(async () => { if (env) await clearSharedHistory(env.DB); });
 
 describe("save, list, load, delete", () => {
   test("round trip keeps the summary and per-window data", async () => {
-    const { cookie } = await newUser();
+    const { cookie } = await newSession();
     const saved = await call("/api/history", { method: "POST", cookie, body: sampleSave() });
     assert.equal(saved.status, 201, saved.text);
     assert.match(saved.data.id, /^[0-9a-f-]{36}$/);
@@ -65,7 +77,7 @@ describe("save, list, load, delete", () => {
   });
 
   test("flag counts are computed from the windows, not trusted from the client", async () => {
-    const { cookie } = await newUser();
+    const { cookie } = await newSession();
     const windows = sampleSave().windows.map((w) => ({ ...w, above_threshold: true }));
     const saved = await call("/api/history", { method: "POST", cookie, body: sampleSave({ windows }) });
     assert.equal(saved.data.flagged_count, 3);
@@ -73,13 +85,13 @@ describe("save, list, load, delete", () => {
   });
 
   test("duration is optional", async () => {
-    const saved = await call("/api/history", { method: "POST", cookie: (await newUser()).cookie, body: sampleSave({ duration_seconds: null }) });
+    const saved = await call("/api/history", { method: "POST", cookie: (await newSession()).cookie, body: sampleSave({ duration_seconds: null }) });
     assert.equal(saved.status, 201, saved.text);
     assert.equal(saved.data.duration_seconds, null);
   });
 
   test("list is newest first and limited", async () => {
-    const { cookie } = await newUser();
+    const { cookie } = await newSession();
     const ids = [];
     for (let i = 0; i < 3; i++) {
       ids.push((await call("/api/history", { method: "POST", cookie, body: sampleSave() })).data.id);
@@ -94,51 +106,63 @@ describe("save, list, load, delete", () => {
     }
   });
 
-  test(`keeps only the newest ${MAX_RECORDS_PER_USER} records per user`, async () => {
-    const { cookie, userId } = await newUser();
-    for (let i = 0; i < MAX_RECORDS_PER_USER + 2; i++) {
+  test(`keeps only the newest ${MAX_RECORDS_PER_OWNER} records in the shared History`, async () => {
+    const { cookie } = await newSession();
+    const legacy = await insertLegacyRow(env.DB);
+    for (let i = 0; i < MAX_RECORDS_PER_OWNER + 2; i++) {
       assert.equal((await call("/api/history", { method: "POST", cookie, body: sampleSave() })).status, 201);
     }
-    // The owner column (named browser_id before accounts existed) holds the Better Auth user ID.
-    const { count } = await env.DB.prepare("SELECT COUNT(*) AS count FROM analysis_history WHERE browser_id = ?1").bind(userId).first();
-    assert.equal(count, MAX_RECORDS_PER_USER);
+    // The owner column (named browser_id before logins existed) holds the shared owner for new rows.
+    const { count } = await env.DB.prepare("SELECT COUNT(*) AS count FROM analysis_history WHERE browser_id = ?1").bind(SHARED_OWNER).first();
+    assert.equal(count, MAX_RECORDS_PER_OWNER);
+    const kept = await env.DB.prepare("SELECT id FROM analysis_history WHERE id = ?1").bind(legacy.id).first();
+    assert.ok(kept, "pruning the shared History never deletes rows saved under earlier per-user owners");
   });
 });
 
-describe("per-user scoping", () => {
-  test("another user can't list, load or delete a record", async () => {
-    const owner = await newUser(), other = await newUser();
-    const { data: item } = await call("/api/history", { method: "POST", cookie: owner.cookie, body: sampleSave() });
-    assert.deepEqual((await call("/api/history", { cookie: other.cookie })).data.items, []);
-    assert.equal((await call(`/api/history/${item.id}`, { cookie: other.cookie })).status, 404);
-    assert.equal((await call(`/api/history/${item.id}`, { method: "DELETE", cookie: other.cookie })).status, 404);
-    assert.equal((await call(`/api/history/${item.id}`, { cookie: owner.cookie })).status, 200, "still there for its owner");
+describe("shared History", () => {
+  test("everyone who logs in with the team password sees, opens and deletes the same records", async () => {
+    const a = await newSession(), b = await newSession();
+    assert.notEqual(a.cookie, b.cookie, "each login gets its own session");
+    const { data: item } = await call("/api/history", { method: "POST", cookie: a.cookie, body: sampleSave() });
+    assert.deepEqual((await call("/api/history", { cookie: b.cookie })).data.items.map((i) => i.id), [item.id]);
+    assert.equal((await call(`/api/history/${item.id}`, { cookie: b.cookie })).status, 200);
+    assert.equal((await call(`/api/history/${item.id}`, { method: "DELETE", cookie: b.cookie })).status, 200);
+    assert.deepEqual((await call("/api/history", { cookie: a.cookie })).data.items, []);
+  });
+
+  test("rows saved earlier under per-user owners stay in D1 but are never listed, opened or deleted", async () => {
+    const { cookie } = await newSession();
+    const legacy = await insertLegacyRow(env.DB);
+    assert.deepEqual((await call("/api/history", { cookie })).data.items, []);
+    assert.equal((await call(`/api/history/${legacy.id}`, { cookie })).status, 404);
+    assert.equal((await call(`/api/history/${legacy.id}`, { method: "DELETE", cookie })).status, 404);
+    const row = await env.DB.prepare("SELECT browser_id FROM analysis_history WHERE id = ?1").bind(legacy.id).first();
+    assert.equal(row.browser_id, legacy.owner, "the legacy row is untouched");
   });
 
   test("an ID sent by the client never selects whose history is used", async () => {
-    const owner = await newUser(), other = await newUser();
-    const { data: item } = await call("/api/history", { method: "POST", cookie: owner.cookie, body: sampleSave() });
-    // The old browser-ID header, set to the owner's user ID, gives the other user nothing.
-    const forged = { "x-browser-id": owner.userId, "x-user-id": owner.userId };
-    assert.deepEqual((await call("/api/history", { cookie: other.cookie, headers: forged })).data.items, []);
-    assert.equal((await call(`/api/history/${item.id}`, { cookie: other.cookie, headers: forged })).status, 404);
+    const { cookie } = await newSession();
+    const legacy = await insertLegacyRow(env.DB);
+    const forged = { "x-browser-id": legacy.owner, "x-user-id": legacy.owner };
+    assert.deepEqual((await call(`/api/history?browser_id=${legacy.owner}`, { cookie, headers: forged })).data.items, []);
+    assert.equal((await call(`/api/history/${legacy.id}`, { cookie, headers: forged })).status, 404);
     // An owner field in the body is rejected, not used.
-    for (const extra of [{ user_id: owner.userId }, { browser_id: owner.userId }]) {
-      const res = await call("/api/history", { method: "POST", cookie: other.cookie, body: sampleSave(extra) });
+    for (const extra of [{ user_id: legacy.owner }, { browser_id: legacy.owner }]) {
+      const res = await call("/api/history", { method: "POST", cookie, body: sampleSave(extra) });
       assert.equal(res.status, 400, JSON.stringify(extra));
     }
-    assert.equal((await call("/api/history", { cookie: owner.cookie })).data.items.length, 1);
   });
 
   test("every history route requires a valid session", async () => {
     const id = crypto.randomUUID();
-    const { userId } = await newUser();
-    for (const cookie of [undefined, "", "better-auth.session_token=forged.value", "better-auth.session_token=' OR 1=1 --"]) {
+    const forgedToken = "A".repeat(43);
+    for (const cookie of [undefined, "", `__Host-motion-atlas-session=${forgedToken}`, "__Host-motion-atlas-session=' OR 1=1 --",
+      "better-auth.session_token=forged.value"]) {
       for (const [path, method, body] of [
         ["/api/history", "GET"], ["/api/history", "POST", sampleSave()], [`/api/history/${id}`, "GET"], [`/api/history/${id}`, "DELETE"],
       ]) {
-        // Without a session, the old browser-ID header doesn't help either.
-        const res = await call(path, { method, cookie, body, headers: { "x-browser-id": userId } });
+        const res = await call(path, { method, cookie, body, headers: { "x-browser-id": SHARED_OWNER } });
         assert.equal(res.status, 401, `${method} ${path} with ${JSON.stringify(cookie)}`);
         assert.match(res.data.detail, /log in/);
       }
@@ -146,17 +170,17 @@ describe("per-user scoping", () => {
   });
 
   test("after logging out, the old session cookie no longer works", async () => {
-    const { cookie } = await newUser();
+    const { cookie } = await newSession();
     assert.equal((await call("/api/history", { cookie })).status, 200);
-    const out = await call("/api/auth/sign-out", { method: "POST", cookie, body: {}, headers: { origin: "http://app.test" } });
-    assert.equal(out.status, 200, out.text);
+    const out = await call("/api/logout", { method: "POST", cookie, headers: { origin: "http://app.test" } });
+    assert.equal(out.status, 303);
     assert.equal((await call("/api/history", { cookie })).status, 401);
   });
 });
 
 describe("request validation", () => {
   let cookie;
-  before(async () => { ({ cookie } = await newUser()); });
+  before(async () => { ({ cookie } = await newSession()); });
   const post = (body, headers) => call("/api/history", { method: "POST", cookie, body, headers });
 
   test("rejects raw data and file names (unknown fields), storing nothing", async () => {
@@ -222,9 +246,9 @@ describe("history failures don't affect analysis", () => {
     assert.match((await a.json()).detail, /log in/);
   });
 
-  // Login uses the same D1 database, so "history storage failing" means its table failing while the auth tables still work.
+  // Sessions use the same D1 database, so "history storage failing" means its table failing while app_session still works.
   test("failing history storage: history answers a JSON 500, analysis still works", async () => {
-    const { cookie } = await newUser();
+    const { cookie } = await newSession();
     const e = { ...env, DB: historyBroken(env.DB) };
     const c = caller(worker, e);
     for (const [path, method, body] of [["/api/history", "GET"], ["/api/history", "POST", sampleSave()], [`/api/history/${crypto.randomUUID()}`, "GET"]]) {
@@ -238,7 +262,7 @@ describe("history failures don't affect analysis", () => {
   });
 
   test("no DB binding: protected routes answer a JSON error instead of crashing", async () => {
-    const { cookie } = await newUser();
+    const { cookie } = await newSession();
     const e = { ...env, DB: undefined };
     const res = await caller(worker, e)("/api/history", { cookie });
     assert.ok(res.status >= 500, `HTTP ${res.status}`);
@@ -247,14 +271,16 @@ describe("history failures don't affect analysis", () => {
     assert.ok(a.status >= 500, `HTTP ${a.status}`);
   });
 
-  test("no auth secret: protected routes say authentication isn't configured", async () => {
-    const e = { ...env, BETTER_AUTH_SECRET: "" };
-    const h = await caller(worker, e)("/api/history");
-    assert.equal(h.status, 503);
-    assert.match(h.data.detail, /Authentication is not configured/);
-    const a = await analyze(e);
-    assert.equal(a.status, 503);
-    assert.match((await a.json()).detail, /Authentication is not configured/);
+  test("no team password set: protected routes say login isn't configured", async () => {
+    const { cookie } = await newSession();
+    for (const e of [{ ...env, APP_PASSWORD: "" }, { ...env, APP_PASSWORD: undefined }]) {
+      const h = await caller(worker, e)("/api/history", { cookie });
+      assert.equal(h.status, 503);
+      assert.match(h.data.detail, /Login is not configured/);
+      const a = await analyze(e, cookie);
+      assert.equal(a.status, 503);
+      assert.match((await a.json()).detail, /Login is not configured/);
+    }
   });
 });
 
@@ -270,7 +296,7 @@ describe("app history client against the Worker", () => {
   });
 
   test("persist, list, restore and delete with the app's own functions", async () => {
-    const opts = viaWorker((await newUser()).cookie);
+    const opts = viaWorker((await newSession()).cookie);
     const result = sampleResult();
     const outcome = await persistAnalysis(result, 8.2, 1.92, opts);
     assert.equal(outcome.saved, true);
@@ -294,7 +320,7 @@ describe("app history client against the Worker", () => {
   });
 
   test("a save that fails on the Worker is reported, not thrown", async () => {
-    const opts = viaWorker((await newUser()).cookie, { ...env, DB: historyBroken(env.DB) });
+    const opts = viaWorker((await newSession()).cookie, { ...env, DB: historyBroken(env.DB) });
     const outcome = await persistAnalysis(sampleResult(), 8.2, 1.92, opts);
     assert.equal(outcome.saved, false);
     assert.match(outcome.message, /analysis itself is not affected/);
@@ -307,7 +333,7 @@ describe("app history client against the Worker", () => {
   });
 });
 
-/** The real local D1, except that anything touching the analysis_history table fails (the auth tables keep working). */
+/** The real local D1, except that anything touching the analysis_history table fails (app_session keeps working). */
 function historyBroken(db) {
   const check = (sql) => { if (/analysis_history/i.test(sql)) throw new Error("D1_ERROR: analysis_history unavailable"); };
   return {

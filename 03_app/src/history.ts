@@ -3,7 +3,7 @@ import type { KeypointResult } from "./api";
 
 // Saved analysis history (Worker -> D1).
 // Only summary data and per-window scores/times are sent.
-// The Worker determines ownership from the authenticated Better Auth session.
+// The Worker checks the login session and decides ownership itself (one History shared by the team).
 // No browser-generated identifier is used for access control.
 
 export interface HistoryItem {

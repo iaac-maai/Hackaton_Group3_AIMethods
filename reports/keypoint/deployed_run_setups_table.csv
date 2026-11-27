@@ -1,0 +1,6 @@
+Setup,Parameters,Training time (s),Epochs run,Val MSE (normal),Test MSE (all),Test ROC AUC,Test precision,Test recall,Threshold
+"A Dense, latent 16",423792.0,1.9,40.0,0.2079,0.4320,0.784,0.846,0.419,0.6588
+"B Conv1d, latent 16",78066.0,5.8,40.0,0.3095,0.7845,0.807,0.901,0.585,1.1723
+"C Conv1d, latent 8",71914.0,5.4,40.0,0.3040,0.8689,0.814,0.913,0.637,1.2108
+"Reference: PCA, 8 components",13056.0,,,0.2670,0.4504,0.766,0.238,0.020,1.0259
+Reference: pose deviation,,,,,,0.843,0.891,0.657,1.8396

@@ -58,6 +58,25 @@ describe("migration 0001 schema", () => {
   }
 });
 
+describe("migration 0003 schema (shared-password sessions)", () => {
+  let proxy, db;
+  before(async () => { proxy = await localD1(); db = proxy.env.DB; });
+  after(async () => { await proxy?.dispose(); });
+
+  test("creates app_session with only a token hash and times (no personal data)", async () => {
+    const { results } = await db.prepare("SELECT name FROM pragma_table_info('app_session') ORDER BY cid").all();
+    assert.deepEqual(results.map((r) => r.name), ["token_hash", "created_at", "expires_at"]);
+    const idx = await db.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'app_session' AND name LIKE 'idx_%'").all();
+    assert.deepEqual(idx.results.map((r) => r.name), ["idx_app_session_expires"]);
+  });
+
+  test("leaves the earlier tables in place (History and the old Better Auth tables are not dropped)", async () => {
+    const { results } = await db.prepare(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('analysis_history', 'user', 'session', 'account', 'verification') ORDER BY name").all();
+    assert.deepEqual(results.map((r) => r.name), ["account", "analysis_history", "session", "user", "verification"]);
+  });
+});
+
 describe("wrangler d1 migrations apply --local", () => {
   const wrangler = join(APP_DIR, "node_modules", "wrangler", "bin", "wrangler.js");
   let dir;
@@ -67,16 +86,17 @@ describe("wrangler d1 migrations apply --local", () => {
     cwd: APP_DIR, encoding: "utf8", env: { ...process.env, CI: "1", WRANGLER_SEND_METRICS: "false" }, timeout: 120_000,
   });
 
-  test("applies 0001 once, then has nothing left to apply", () => {
+  test("applies every migration once, then has nothing left to apply", () => {
     const first = run("migrations", "apply", "DB");
     assert.equal(first.status, 0, first.stderr + first.stdout);
     assert.match(first.stdout, /0001_create_analysis_history\.sql/);
+    assert.match(first.stdout, /0003_create_app_sessions\.sql/);
     const second = run("migrations", "apply", "DB");
     assert.equal(second.status, 0, second.stderr + second.stdout);
     assert.match(second.stdout, /No migrations to apply/i);
     const tables = run("execute", "DB", "--json", "--command",
-      "SELECT name FROM sqlite_master WHERE name IN ('analysis_history', 'd1_migrations') ORDER BY name");
+      "SELECT name FROM sqlite_master WHERE name IN ('analysis_history', 'app_session', 'd1_migrations') ORDER BY name");
     assert.equal(tables.status, 0, tables.stderr + tables.stdout);
-    assert.deepEqual(JSON.parse(tables.stdout)[0].results.map((r) => r.name), ["analysis_history", "d1_migrations"]);
+    assert.deepEqual(JSON.parse(tables.stdout)[0].results.map((r) => r.name), ["analysis_history", "app_session", "d1_migrations"]);
   });
 });
