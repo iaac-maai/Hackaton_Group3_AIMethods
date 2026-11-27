@@ -1,5 +1,14 @@
 # Motion Atlas: movement deviation review for construction work
 
+![Motion Atlas analysing an 8-second clip. Left: the video, paused at 0:03, with the MoveNet skeleton drawn over a person crouching on a rooftop. Right: 3 of 4 windows above threshold, the trained threshold 0.659, 8.0 s analysed; a bar chart of movement deviation per 1.92-second window where three orange bars rise above the threshold line; and three flagged moments, 0:01.9–0:03.8 (score 0.798), 0:03.8–0:05.8 (0.813) and 0:05.8–0:07.7 (0.815).](docs/images/app/motion-atlas-result.jpg)
+
+*A real result from the deployed keypoint model (threshold 0.6588) on an 8-second demo clip recorded by the team, shown with the consent of the person filmed. The app ran locally on the same model files that are published to Hugging Face. The video is paused at 0:03, inside the first flagged window. Video and result panels are crops of one screenshot, placed side by side. The score shows movement deviation only, not fatigue or safety.*
+
+| History | Model tab |
+|---|---|
+| <img src="docs/images/app/history.png" alt="History list with three saved video analyses from 27 Nov 2026: 8.2 s with 0 of 4 windows flagged, 8.0 s with 3 of 4 flagged (75%), and 13.8 s with 7 of 7 flagged (100%). Each row has a Delete button." width="420"> | <img src="docs/images/app/model-tab-motion-track.jpg" alt="Model tab, motion track panel: a 3D plot of joint trails over a 1.92-second reference window, with the tracked input in blue and the autoencoder's reconstruction in orange; the left wrist is selected, and the window MSE of 0.083 is within the cutoff." width="420"> |
+| Saved summaries of three demo-clip analyses. Only scores and times are stored, never video or keypoints. | Input (blue) against reconstruction (orange) for one reference window. **Note:** this tab's built-in data comes from an earlier training run, not the deployed weights. See [evidence notes](#evidence-notes). |
+
 **Project:** AI Methods I hackathon, Group 3 (IAAC, MaAI 2026/27)
 **Dataset:** [VTT-ConIoT](https://doi.org/10.5281/zenodo.4683703): 13 construction workers, 16 activities, wearable IMU and video pose keypoints
 
@@ -28,7 +37,7 @@ Checks: the app's test suite (`npm test` in `03_app`) passes, 145 tests; the app
 2. **Cloudflare Worker** (`03_app/worker/`): checks the login session and forwards the keypoints to the scoring API.
 3. **Scoring API on Render** (`02_model_server/`): normalizes the pose, cuts 48-frame windows, runs the ONNX autoencoder and returns one score per window, the threshold, and an approximate 2D posture summary.
 4. **Back in the browser:** a score timeline, flagged moments you can jump to in the local video, the skeleton drawn over the video, and input-quality warnings.
-5. **History (Cloudflare D1):** each analysis summary is saved to the user's account (scores and times only; never video, keypoints or file names).
+5. **History (Cloudflare D1):** each analysis summary is saved to the team's shared History (scores and times only; never video, keypoints or file names).
 
 The **Schedule** tab drafts a shift plan with breaks; it stays on the page and is not saved. **Multi-person** analysis tracks several people (A, B, C…) and scores each track; it is experimental and is not saved to History.
 
@@ -39,21 +48,68 @@ Each input is a window of **48 frames (1.92 s at 25 fps) × 17 joints × (x, y) 
 - **Reference ("normal") movement:** tasks 13, 14 and 15 (walking straight, winding walking, pushing a cart). The model is trained only on these.
 - **Comparison movement:** tasks 7, 8, 11 and 12, used only for evaluation.
 - **Participant split:** users 1–9 train, 10–11 validation, 12–13 test. No participant appears in two splits.
-- **Threshold:** the 90th percentile of reference validation error. A window above it is flagged.
+- **Threshold:** the 90th percentile of reference validation error, **MSE 0.6588** (`threshold_mse` in [`models/keypoint/config.json`](models/keypoint/config.json)). A window above it is flagged.
 
-| Setup | Parameters | Val MSE (reference) | Test ROC AUC | Test precision | Test recall | Threshold |
+### The deployed network (setup A)
+
+A small dense autoencoder. It squeezes each pose window into **16 numbers** and rebuilds the window from them. Movement unlike the reference tasks is rebuilt worse, so its error is higher.
+
+```mermaid
+flowchart LR
+  I["Input window<br/>48 frames × 17 joints × (x, y)<br/>48 × 34 = 1,632 values"] --> E1["Dense 1,632 → 128<br/>ReLU"]
+  E1 --> Z["Latent code<br/>16 numbers"]
+  Z --> D1["Dense 16 → 128<br/>ReLU"]
+  D1 --> D2["Dense 128 → 1,632"]
+  D2 --> R["Reconstruction<br/>48 × 34"]
+  R -. "mean squared error<br/>vs input" .-> S["Window score"]
+```
+
+- **Layers and size:** encoder `Linear(1632, 128) → ReLU → Linear(128, 16)`; decoder `Linear(16, 128) → ReLU → Linear(128, 1632)`, reshaped back to 48 × 34. There is no activation on the 16-number code. That makes **423,792 trainable parameters** (209,024 + 2,064 + 2,176 + 210,528).
+- **Checked against:** the PyTorch definition (`Dense` in [`01_autoencoder/keypoint_anomaly.ipynb`](01_autoencoder/keypoint_anomaly.ipynb)) and the deployed ONNX graph [`models/keypoint/model.onnx`](https://huggingface.co/iaac-maai/hackathon-team3-movement-strain-ae/tree/main/keypoint). The graph takes `keypoint_window (batch, 48, 34)` and outputs `embedding (batch, 16)` and `reconstruction (batch, 48, 34)`.
+- **Training:** Adam (learning rate 0.001), batch 64, at most 40 epochs, early stopping after 6 epochs without validation improvement, seed 42. The weights from the epoch with the lowest validation error are kept.
+- **Score:** the mean squared error over all 1,632 values of the window, in standardized units. It is **not an accuracy**: lower means the movement is closer to the reference tasks.
+
+### Training and validation loss
+
+![Training and validation MSE per epoch for setups A, B and C. Setup A, the deployed model, drops from 0.75 to about 0.10 training MSE and from 0.46 to 0.208 validation MSE, with the kept weights at epoch 39 (validation 0.2079). B is kept at epoch 34 (0.3095) and C at epoch 40 (0.3040).](docs/images/model/keypoint_training_loss.png)
+
+*Training split: reference-task windows of users 1–9 (1,473). Validation split: users 10–11 (225). Source: the training log saved in the notebook, extracted to [`reports/keypoint/deployed_run_training_history.csv`](reports/keypoint/deployed_run_training_history.csv).*
+
+### Setups A–C against two reference methods
+
+| Setup | Parameters | Validation MSE ↓ | Test ROC AUC ↑ | Test precision | Test recall | Threshold (MSE) |
 |---|---:|---:|---:|---:|---:|---:|
-| **A Dense, latent 16 (deployed)** | 423,792 | 0.2086 | 0.788 | 0.881 | 0.536 | 0.6765 |
-| B Conv1d, latent 16 | 78,066 | 0.3073 | 0.801 | 0.885 | 0.496 | 1.1696 |
-| C Conv1d, latent 8 | 71,914 | 0.3067 | 0.809 | 0.895 | 0.552 | 1.1584 |
-| Reference: PCA, 8 components | 13,056 | 0.267 | 0.766 | 0.238 | 0.02 | 1.0259 |
+| **A Dense, latent 16 (deployed)** | 423,792 | **0.2079** | 0.784 | 0.846 | 0.419 | 0.6588 |
+| B Conv1d, latent 16 | 78,066 | 0.3095 | 0.807 | 0.901 | 0.585 | 1.1723 |
+| C Conv1d, latent 8 | 71,914 | 0.3040 | 0.814 | 0.913 | 0.637 | 1.2108 |
+| Reference: PCA, 8 components | 13,056 | 0.2670 | 0.766 | 0.238 | 0.020 | 1.0259 |
 | Reference: pose deviation | — | — | 0.843 | 0.891 | 0.657 | 1.8396 |
 
-Source: [`reports/keypoint/setups_table.csv`](reports/keypoint/setups_table.csv). On the held-out test workers (396 windows), the deployed model flags 133 of 248 comparison windows and 18 of 148 reference windows (F1 0.667).
+![Two bar charts. Test ROC AUC, higher is better: A 0.784, B 0.807, C 0.814, PCA 0.766, pose deviation 0.843. Validation MSE, lower is better: A 0.2079, B 0.3095, C 0.3040, PCA 0.2670; pose deviation has none because it does not reconstruct.](docs/images/model/keypoint_setup_comparison.png)
 
-**Threshold note:** re-scoring the saved ONNX model gives a validation 90th percentile of **0.67649**, the value in the table above. The deployed `config.json` stores **0.65884**, from a different calibration. The API uses the stored value.
+*Validation MSE (lower is better) is mean reconstruction error on the 225 reference-task windows of users 10–11. It is the only criterion used to choose the deployed model. Test ROC AUC (higher is better; 0.5 is chance) measures how well each score separates the 248 comparison-task windows from the 148 reference-task windows of held-out users 12–13. Precision and recall use each method's own 90th-percentile validation threshold. Source: [`reports/keypoint/deployed_run_setups_table.csv`](reports/keypoint/deployed_run_setups_table.csv). The A, PCA and pose-deviation rows were re-checked by re-scoring, in [`reports/keypoint/deployed_eval_summary.json`](reports/keypoint/deployed_eval_summary.json).*
 
-The **Model** tab in the app shows this evaluation as interactive 3D graphs: input vs reconstruction motion tracks, the validation error distribution, a per-window score track for one held-out recording, the confusion matrix with a movable threshold, and split coverage. Drag a graph to rotate it. In the motion track, trails are drawn on a schematic body layout; each joint's displacement is its standardized coordinate, not a real-world position.
+A reconstructs reference movement best, which is why it was chosen. But it does not separate the task groups best: B, C and the simple pose-deviation baseline reach a higher test AUC. Picking on validation reconstruction alone favoured the model that also rebuilds unfamiliar movement fairly well.
+
+### Test result at the deployed threshold
+
+![Left: histogram of reconstruction MSE for the 396 test windows on a log scale; reference-task windows (blue) mostly fall between 0.02 and 0.3, and comparison-task windows (orange) form a tall peak around 0.6–0.8, straddling the dashed threshold line at 0.6588. Right: confusion matrix at that threshold: reference windows 129 not flagged and 19 flagged; comparison windows 144 not flagged and 104 flagged; precision 0.846, recall 0.419.](docs/images/model/keypoint_test_errors.png)
+
+*Held-out test users 12–13: 396 windows. Source: the deployed model file ([`keypoint/model.onnx` on Hugging Face](https://huggingface.co/iaac-maai/hackathon-team3-movement-strain-ae/tree/main/keypoint), identical to the local `models/keypoint/model.onnx`) re-scored with its scaler by [`01_autoencoder/evaluate_deployed_keypoint.py`](01_autoencoder/evaluate_deployed_keypoint.py). Output: [`reports/keypoint/deployed_window_errors.csv`](reports/keypoint/deployed_window_errors.csv) and [`deployed_eval_summary.json`](reports/keypoint/deployed_eval_summary.json).*
+
+**What the threshold means:** 0.6588 is the error that 90% of reference-task validation windows stay under; 23 of the 225 exceed it. Above it, a window is flagged for human review.
+
+**What the test result means:** the deployed model flags 123 of the 396 test windows. Of those, 104 come from comparison tasks (precision 0.846), so 104 of the 248 comparison windows are caught (recall 0.419, F1 0.561). Another 19 of the 148 reference windows are flagged. Many comparison windows sit just below the threshold, which is why recall is moderate. ROC AUC over all thresholds is 0.784.
+
+"Comparison task" is a group of different activities, not a label of unsafe or abnormal movement. These numbers measure how well reconstruction error separates two task groups for two held-out workers. They are not an accuracy, and not a measure of fatigue or safety.
+
+The **Model** tab in the app shows interactive 3D views: input against reconstruction, the validation error distribution, a per-window score track, a confusion matrix with a movable threshold, and split coverage. Its built-in data is from the earlier run described below.
+
+### Evidence notes
+
+- **Two training runs are in the repository; only one is deployed.** The live API loads `keypoint/model.onnx` from Hugging Face. On 27 Nov 2026 that file had the same SHA-256 (`67fc9551…`) as `models/keypoint/model.onnx`, and the live `/health` reported threshold 0.6588. Re-scoring that file reproduces the notebook's saved outputs exactly (validation MSE 0.207885, threshold 0.65884), so every number above comes from that run.
+- **Older figures from the other run.** [`reports/keypoint/setups_table.csv`](reports/keypoint/setups_table.csv), [`pmin_sensitivity.csv`](reports/keypoint/pmin_sensitivity.csv), [`keypoint_anomaly_figure.png`](reports/keypoint/keypoint_anomaly_figure.png) and the Model tab's built-in data come from a different run: validation MSE 0.2086, threshold 0.6765, precision 0.881, recall 0.536. That run's weights are not in this repository or on Hugging Face, so its results can't be reproduced. An earlier version of this README quoted them for the deployed model. **Needs review:** regenerate or retire those files and the Model tab data.
+- **Re-running:** `python 01_autoencoder/evaluate_deployed_keypoint.py` (needs the VTT-ConIoT keypoint CSVs in `data/`), then `extract_notebook_results.py` and `make_readme_figures.py`. Nothing is retrained.
 
 ## Repository map
 
@@ -84,12 +140,12 @@ Web app (Node.js 22.6 or newer), in a second terminal:
 ```powershell
 cd 03_app
 npm install
-copy .dev.vars.example .dev.vars   # then set BETTER_AUTH_SECRET (npx @better-auth/cli secret)
+copy .dev.vars.example .dev.vars   # then set APP_PASSWORD= to a local team password of your choice
 npm run db:migrate:local
-npm run dev                        # open http://localhost:5173 and sign up
+npm run dev                        # open http://localhost:5173 and log in with that password
 ```
 
-The local database is separate from the deployed one, so create a local account. Deployment steps (D1, secrets, `npm run deploy`) are in [`03_app/README.md`](03_app/README.md).
+The local database and password are separate from the deployed ones. Deployment steps (D1, the `APP_PASSWORD` secret, `npm run deploy`) are in [`03_app/README.md`](03_app/README.md).
 
 ## Limits
 
@@ -97,7 +153,7 @@ The local database is separate from the deployed one, so create a local account.
 - **Recall is moderate.** About half of the comparison windows stay under the threshold (recall 0.536).
 - **Two test workers.** Only participants 12 and 13 were held out, so results may not generalize to other people or camera setups.
 - **2D pose from one camera.** MoveNet keypoints are approximate; knees and ankles are often missed, and the app warns when they are. The training data's pose detector is unknown.
-- **Prototype security.** Sign-up is open and emails are not verified. Do not analyse confidential footage or sensitive personal data.
+- **Prototype security.** One shared team password protects the app, and everyone who has it shares the same History. Do not analyse confidential footage or sensitive personal data.
 
 ## Day 1: IMU autoencoders
 
@@ -170,6 +226,24 @@ python .\src\train_autoencoder_conv16.py
 ```
 
 Each script writes its model artifacts and reports to the corresponding folders under `models/` and `reports/`.
+
+## AI usage disclosure
+
+### Tools
+Claude and ChatGPT
+
+### Why
+
+We used AI assistance to move faster on unfamiliar machine-learning and web-development tasks, explore implementation options, and prepare first drafts of documentation and presentation material.
+
+### Where (Monday–Thursday)
+Monday: dataset exploration, data preparation, and comparisons of the initial IMU autoencoders. Tuesday–Thursday: work on the video keypoint model and web app, including analysis, tracking, authentication, History, scheduling and analytics; debugging and testing; and drafts or revisions of the diagrams, README content and presentation script.
+
+### How
+We treated AI output as a starting point, not as verified fact. We checked model and dataset claims against project files and results, reviewed code changes, and used builds, tests and browser checks to catch problems. We kept the IMU experiments separate from the keypoint model used by the app, and avoided putting secrets or video files into Git.
+
+### Lessons learned
+Training the dense autoencoder and two 1D convolutional autoencoders taught us that model choice depends on what we need the model to do. For the IMU experiments, the dense model had the lowest test reconstruction error, so we chose it as the best of those three for reconstructing IMU signals. Motion Atlas uses a separate keypoint autoencoder because the app analyzes pose extracted from video. We learned not to treat those models’ scores as directly comparable—or call reconstruction error “accuracy.” The results helped us choose a direction, but they don’t prove the model will generalize to every worker or site.
 
 ## Source and attribution
 

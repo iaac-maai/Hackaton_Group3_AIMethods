@@ -54,6 +54,8 @@ const TONES = {
   privacy: { fill: T.accent, fo: 0.1, stroke: T.accent, so: 0.55, title: T.ink, body: T.ink2 },
   ghost: { fill: "none", stroke: T.ink, so: 0.22, dash: "6 6", title: T.ink2, body: T.muted },
   start: { fill: T.surface2, stroke: T.ink, so: 0.18, title: T.ink, body: T.ink2 },
+  // Shared-password gate band (system architecture only).
+  gate: { fill: "#13111f", stroke: T.custom, so: 0.5, title: T.ink, body: T.ink2 },
 };
 
 /** A box with an optional kicker, title and body lines. */

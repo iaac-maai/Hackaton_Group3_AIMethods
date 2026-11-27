@@ -4,9 +4,9 @@ import {
   type Analytics, type Bucket, type Granularity,
 } from "../analytics";
 
-// Analytics tab: summaries and trends of the signed-in user's own saved History records.
-// Data comes only from the Worker's /api/analytics route, which reads the user's records from the
-// login session. Nothing is tracked, sent to third parties, or stored by this view.
+// Analytics tab: summaries and trends of the team's shared History records.
+// Data comes only from the Worker's /api/analytics route, which reads the shared History after its
+// login check. Nothing is tracked, sent to third parties, or stored by this view.
 
 export type AnalyticsState =
   | { kind: "loading" }
@@ -26,19 +26,19 @@ interface ViewProps {
 export function AnalyticsView({ state, onRetry }: ViewProps) {
   return (
     <section className="analytics" aria-labelledby="analytics-title" aria-busy={state.kind === "loading"}>
-      <h2 id="analytics-title">Your analytics</h2>
+      <h2 id="analytics-title">Team analytics</h2>
       <p className="muted analytics-intro">
-        Built only from the summaries in your own History (saved single-person video analyses): dates, window counts
-        and flagged-window counts. No video, keypoints or file names are used, and nothing is shared or tracked.
+        Built only from the summaries in the team’s shared History (saved single-person video analyses): dates, window counts
+        and flagged-window counts. No video, keypoints or file names are used, and nothing is tracked or sent to third parties.
         Multi-person results aren’t saved to History, so they aren’t included.
       </p>
       <p className="analytics-disclaimer" role="note"><strong>Not a safety measure.</strong> {DISCLAIMER}</p>
 
-      {state.kind === "loading" && <p role="status">Loading your analytics…</p>}
+      {state.kind === "loading" && <p role="status">Loading the team’s analytics…</p>}
 
       {state.kind === "error" && (
         <div className="error-box" role="alert">
-          <p>Could not load your analytics: {state.message}</p>
+          <p>Could not load the analytics: {state.message}</p>
           <button onClick={onRetry}>Try again</button>
         </div>
       )}
@@ -76,15 +76,15 @@ function Dashboard({ a }: { a: Analytics }) {
 
       <p className={a.atRetentionLimit ? "analytics-limit warn" : "analytics-limit muted"} role="note">
         {a.atRetentionLimit
-          ? <>⚠ You have reached the History limit of {a.retentionLimit} saved analyses. Older analyses have been removed
-            as new ones were saved, so these figures cover only your newest {a.retentionLimit}, not your lifetime totals.</>
-          : <>History keeps your newest {a.retentionLimit} analyses; older ones are removed as new ones are saved, and
-            deleted analyses aren’t counted. These figures cover what’s in your History now.</>}
+          ? <>⚠ The shared History has reached its limit of {a.retentionLimit} saved analyses. Older analyses have been removed
+            as new ones were saved, so these figures cover only the newest {a.retentionLimit}, not lifetime totals.</>
+          : <>The shared History keeps the newest {a.retentionLimit} analyses; older ones are removed as new ones are saved, and
+            deleted analyses aren’t counted. These figures cover what’s in it now.</>}
       </p>
 
       {mixedScoring && (
         <p className="analytics-limit warn" role="note">
-          ⚠ Your analyses were scored with {a.scoringVersions.length} different model/threshold settings
+          ⚠ These analyses were scored with {a.scoringVersions.length} different model/threshold settings
           ({a.scoringVersions.map((v) => `${v.model} at ${v.threshold}: ${v.analyses}`).join("; ")}). Flagged shares
           from different settings aren’t directly comparable.
         </p>

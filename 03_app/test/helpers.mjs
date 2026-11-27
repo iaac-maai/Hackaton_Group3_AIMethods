@@ -26,26 +26,36 @@ export async function localD1() {
   return proxy;
 }
 
-/** Test-only Better Auth secret (32+ characters). */
-export const TEST_AUTH_SECRET = "test-only-better-auth-secret-0123456789abcdef";
+/** Test-only shared team password (the real one is a Worker secret and never in the repository). */
+export const TEST_APP_PASSWORD = "test-only-team-password";
 
-/**
- * Sign up a fresh user through the Worker's own Better Auth routes and return the session cookie
- * ("name=value; ..."), as the browser would send it. History is scoped to that user.
- */
-export async function signUp(worker, env, { email = `${crypto.randomUUID()}@example.test`, password = "correct-horse-battery-staple", name = "Test user" } = {}) {
-  const res = await worker.fetch(new Request("http://app.test/api/auth/sign-up/email", {
-    method: "POST", headers: { "content-type": "application/json", origin: "http://app.test" },
-    body: JSON.stringify({ email, password, name }),
+/** The History owner every logged-in request uses (see worker/history.ts). */
+export const SHARED_OWNER = "shared-team";
+
+/** POST the login form like the browser does. Returns the raw Response. */
+export function postLogin(worker, env, password, headers = {}) {
+  return worker.fetch(new Request("http://app.test/api/login", {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded", origin: "http://app.test", ...headers },
+    body: new URLSearchParams({ password }).toString(),
   }), env);
-  if (res.status !== 200) throw new Error(`sign-up failed: HTTP ${res.status} ${await res.text()}`);
-  const data = await res.json();
-  const cookie = res.headers.getSetCookie().map((c) => c.split(";")[0]).join("; ");
-  if (!cookie) throw new Error("sign-up returned no session cookie");
-  return { cookie, userId: data.user.id, email };
 }
 
-/** Call the Worker like the browser would (`cookie`: the session cookie from signUp, if logged in). */
+/** Log in with the shared password and return the session cookie ("name=value"), as the browser would send it. */
+export async function logIn(worker, env, password = TEST_APP_PASSWORD) {
+  const res = await postLogin(worker, env, password);
+  if (res.status !== 303) throw new Error(`login failed: HTTP ${res.status}`);
+  const cookie = res.headers.getSetCookie().map((c) => c.split(";")[0]).join("; ");
+  if (!cookie) throw new Error("login returned no session cookie");
+  return { cookie };
+}
+
+/** Empty the shared History between tests (rows of other owners are left alone). */
+export async function clearSharedHistory(db) {
+  await db.prepare("DELETE FROM analysis_history WHERE browser_id = ?1").bind(SHARED_OWNER).run();
+}
+
+/** Call the Worker like the browser would (`cookie`: the session cookie from logIn, if logged in). */
 export function caller(worker, env) {
   return async (path, { method = "GET", cookie, body, headers = {} } = {}) => {
     const h = new Headers(headers);

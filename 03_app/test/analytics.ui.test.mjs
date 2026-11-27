@@ -43,7 +43,7 @@ const DISCLAIMER = /not measures of fatigue, workload, injury risk or safety/;
 describe("states", () => {
   test("loading: status message, busy, no charts", () => {
     const html = render({ kind: "loading" });
-    assert.match(html, /role="status"[^>]*>Loading your analytics…/);
+    assert.match(html, /role="status"[^>]*>Loading the team’s analytics…/);
     assert.match(html, /aria-busy="true"/);
     assert.doesNotMatch(html, /<svg/);
     assert.match(text(html), DISCLAIMER);
@@ -52,7 +52,7 @@ describe("states", () => {
   test("error: alert with the message and a retry button", () => {
     const html = render({ kind: "error", message: "Please log in to use Motion Atlas." });
     assert.match(html, /role="alert"/);
-    assert.match(text(html), /Could not load your analytics: Please log in to use Motion Atlas\./);
+    assert.match(text(html), /Could not load the analytics: Please log in to use Motion Atlas\./);
     assert.match(html, /<button[^>]*>Try again<\/button>/);
     assert.doesNotMatch(html, /<svg/);
   });
@@ -81,12 +81,12 @@ describe("states", () => {
     assert.match(t, /— /, "the empty day shows no flagged share");
     assert.match(t, /All 3 saved analyses are video analyses\. Video is the only type/);
     assert.match(t, /Multi-person results aren’t saved to History, so they aren’t included\./);
-    assert.match(t, /History keeps your newest 100 analyses/);
-    assert.doesNotMatch(t, /You have reached the History limit/);
+    assert.match(t, /The shared History keeps the newest 100 analyses/);
+    assert.doesNotMatch(t, /has reached its limit/);
   });
 
   test("at the retention limit: visible warning that totals aren't lifetime", () => {
     const html = render(ready([rec(at(2026, 11, 1), 10, 2), rec(at(2026, 11, 2), 10, 2)], 2));
-    assert.match(text(html), /You have reached the History limit of 2 saved analyses\..*not your lifetime totals/);
+    assert.match(text(html), /The shared History has reached its limit of 2 saved analyses\..*not lifetime totals/);
   });
 });

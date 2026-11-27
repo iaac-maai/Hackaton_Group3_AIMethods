@@ -486,12 +486,12 @@ button:active:not(:disabled) { transform: scale(0.98); transition-duration: 0.12
 button:disabled { opacity: 0.45; }
 
 /* Primary actions: solid orange with a warm glow */
-.button, .button-cta, .auth-card form button[type="submit"] {
+.button, .button-cta {
   color: #fff; background: linear-gradient(180deg, #ff8a3d, #f66f14 55%, #e0620f);
   border: 1px solid #ba530e; border-radius: 15px; font-weight: 600;
   box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.25), 0 0 22px rgb(242 147 84 / 0.35);
 }
-.button:hover:not(:disabled), .button-cta:hover:not(:disabled), .auth-card form button[type="submit"]:hover:not(:disabled) {
+.button:hover:not(:disabled), .button-cta:hover:not(:disabled) {
   filter: none; border-color: #d9661a; box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.3), 0 0 32px rgb(242 147 84 / 0.6);
 }
 .button-cta { min-height: 44px; padding: 10px 22px; }
@@ -570,7 +570,7 @@ input:focus-visible, a:focus-visible, .timeline-plot:focus-visible, .segment:foc
   box-shadow: var(--glow-inset), 0 20px 50px rgb(0 0 0 / 0.45);
 }
 .app-header > .brand { grid-column: 1; grid-row: 1; }
-.app-header > .button-secondary { grid-column: 2; grid-row: 1; }
+.app-header > .logout-form { grid-column: 2; grid-row: 1; margin: 0; }
 .app-header > .app-tagline, .app-header > .tabs { grid-column: 1 / -1; justify-self: start; }
 .brand h1 { font-family: var(--font-head); font-size: 1.6rem; font-weight: 700; }
 .brand-mark { width: 13px; height: 13px; background: radial-gradient(circle at 35% 35%, #ffb27a, #f66f14 60%); box-shadow: 0 0 14px rgb(246 111 20 / 0.9); }
@@ -591,29 +591,6 @@ input:focus-visible, a:focus-visible, .timeline-plot:focus-visible, .segment:foc
 .tab:hover:not(:disabled) { color: #fff; }
 .tab[aria-selected="true"] { color: #fff; background: linear-gradient(180deg, #ff8a3d, #f66f14); box-shadow: 0 4px 18px rgb(246 111 20 / 0.45); }
 
-/* ---------- Login / sign-up screen ---------- */
-main.auth-screen {
-  max-width: none; min-height: 100vh; margin: 0; display: grid; place-items: center; padding: 24px 16px;
-  background: radial-gradient(700px 380px at 50% 105%, rgb(246 111 20 / 0.28), transparent 70%);
-}
-.auth-card {
-  width: min(420px, 100%); padding: 32px 30px 26px; text-align: center;
-  background: var(--card-bg); border: 1px solid var(--line); border-radius: 24px;
-  box-shadow: var(--glow-inset), 0 30px 80px rgb(0 0 0 / 0.55);
-}
-.auth-card h1 { margin: 0; font-size: 2rem; font-weight: 700; }
-.auth-card h1 + p { margin: 6px 0 22px; color: var(--muted); }
-.auth-card h2 { margin: 0 0 16px; font-size: 1.15rem; }
-.auth-card form { display: flex; flex-direction: column; gap: 14px; text-align: left; }
-.auth-card label { display: flex; flex-direction: column; gap: 6px; color: var(--ink-2); font-size: 0.88rem; font-weight: 500; }
-.auth-card input { width: 100%; padding: 11px 14px; font-size: 1rem; }
-.auth-card form button[type="submit"] { width: 100%; padding: 12px 16px; margin-top: 4px; font-size: 1rem; }
-.auth-card [role="alert"] { margin: 0; color: var(--err); background: var(--err-bg); border-radius: 10px; padding: 8px 12px; font-size: 0.9rem; }
-.auth-card > button[type="button"], .auth-card > button[type="button"]:hover:not(:disabled) {
-  margin-top: 16px; background: none; border: 0; box-shadow: none; transform: none; color: #ff9b45; padding: 6px 8px;
-}
-.auth-card > button[type="button"]:hover:not(:disabled) { color: #fff; }
-
 /* ---------- Motion ---------- */
 @keyframes ma-rise { from { opacity: 0; transform: translateY(18px); filter: blur(4px); } to { opacity: 1; transform: none; filter: none; } }
 @keyframes ma-glow { from { opacity: 0; transform: translateX(-50%) translateY(60px) scale(0.92); } to { opacity: 1; transform: translateX(-50%); } }
@@ -621,23 +598,18 @@ main.auth-screen {
 
 @media (prefers-reduced-motion: no-preference) {
   /* Page load: header and content fade up in a short stagger (also replays when a tab is shown). */
-  .app-header > .brand, .app-header > .button-secondary, .app-header > .app-tagline, .app-header > .tabs,
-  [role="tabpanel"] > *, .auth-card > * {
+  .app-header > .brand, .app-header > .logout-form, .app-header > .app-tagline, .app-header > .tabs,
+  [role="tabpanel"] > * {
     animation: ma-rise 0.8s var(--ease-out) both;
   }
-  .app-header > .button-secondary { animation-delay: 0.05s; }
+  .app-header > .logout-form { animation-delay: 0.05s; }
   .app-header > .app-tagline { animation-delay: 0.12s; }
   .app-header > .tabs { animation-delay: 0.2s; }
   [role="tabpanel"] > :nth-child(1) { animation-delay: 0.28s; }
   [role="tabpanel"] > :nth-child(2) { animation-delay: 0.36s; }
   [role="tabpanel"] > :nth-child(3) { animation-delay: 0.44s; }
   [role="tabpanel"] > :nth-child(n + 4) { animation-delay: 0.5s; }
-  .auth-card > :nth-child(2) { animation-delay: 0.06s; }
-  .auth-card > :nth-child(3) { animation-delay: 0.12s; }
-  .auth-card > :nth-child(4) { animation-delay: 0.18s; }
-  .auth-card > :nth-child(n + 5) { animation-delay: 0.24s; }
   .app-header-glow { animation: ma-glow 1.6s var(--ease-out) 0.15s both; }
-  .auth-card { animation: ma-rise 0.9s var(--ease-out) both; }
   /* Cards inside a section rise in a quick stagger when that section first appears. */
   .tiles > .tile, .posture dl > div { animation: ma-reveal 0.7s var(--ease-out) both; }
   .tiles > .tile:nth-child(2), .posture dl > div:nth-child(2) { animation-delay: 0.08s; }
@@ -650,11 +622,11 @@ main.auth-screen {
 /* ---------- Logo ---------- */
 .brand h1 { margin: 0; line-height: 0; }
 .brand-logo { display: block; height: 46px; width: auto; }
-.auth-card h1 { line-height: 0; }
-.auth-logo { display: inline-block; width: min(260px, 72%); height: auto; }
 #root > p { min-height: 100vh; margin: 0; display: grid; place-items: center; color: var(--muted); }
 @media (max-width: 600px) { .brand-logo { height: 36px; } }
 
+<<<<<<< HEAD
+=======
 /* ---------- Login: back to the landing page ---------- */
 main.auth-screen { position: relative; }
 .auth-back, .auth-back:hover:not(:disabled) {
@@ -779,6 +751,7 @@ button, .button, .button-secondary, .button-cta, .tab, .segment, .chip, .switch,
 /* Page background colour at about 35% over the video, so the content stays easy to read */
 .landing-video-overlay { position: absolute; inset: 0; z-index: -3; pointer-events: none; background: rgb(6 9 16 / 0.35); }
 
+>>>>>>> origin/main
 /* ---------- Analytics tab ---------- */
 .analytics { margin-top: 16px; }
 .analytics h3 { margin: 0 0 4px; font-size: 1rem; color: var(--ink); }
