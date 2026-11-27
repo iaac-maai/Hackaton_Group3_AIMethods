@@ -119,8 +119,8 @@ The **Model** tab in the app shows interactive 3D views: input against reconstru
 | `02_model_server/` | FastAPI + Gradio scoring service, Render blueprint, tests ([README](02_model_server/README.md)) |
 | `03_app/` | Motion Atlas web app: React (Vite), Cloudflare Worker, D1 migrations, tests ([README](03_app/README.md)) |
 | `04_final/diagrams/` | Final presentation diagrams, editable SVG + PNG ([README](04_final/diagrams/README.md)) |
-| `hf_upload/` | Model files (`model.onnx`, `scaler.npz`, `config.json`) as published to Hugging Face for the API |
-| `models/`, `reports/` | Model weights, scalers, configs, metrics and figures (IMU and keypoint) |
+| `hf_upload/` | The `config.json` files (`imu/`, `keypoint/`) published to Hugging Face with each model; the model binaries are not in Git |
+| `models/`, `reports/` | Model configs, scalers, metrics and figures (IMU and keypoint). Model weights (`.onnx`, `.pt`) are not in Git; the deployed ones are on [Hugging Face](https://huggingface.co/iaac-maai/hackathon-team3-movement-strain-ae) |
 | `src/` | Day 1 IMU training scripts |
 | `slides/` | Day 1 presentation |
 | `model_app/` | The course's example model server (Fashion-MNIST); a reference, not part of Motion Atlas |

@@ -1,2 +1,0 @@
-clip,seconds,mean_point_confidence,trunk_lean_median,knee_bend_median,arm_elevation_median,time_trunk_over_20deg,time_knee_over_30deg,time_arm_over_90deg,frames_with_body_seen,windows_scored,anomaly_error_median,windows_above_threshold,threshold
-WhatsApp Video 2026-11-17 at 4.03.20 PM.keypoints.csv,9.2,0.79,64.1,97.9,76.4,1.0,1.0,0.22,1.0,4,1.239,1.0,0.659

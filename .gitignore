@@ -46,3 +46,14 @@ File conversions/output_images/
 
 # Keep local Claude Code settings out of Git
 .claude/
+
+# Personal editor settings
+.vscode/
+
+# Video-derived outputs of real people: keypoints and overlay videos from
+# 01_autoencoder/video_to_keypoints.py, and the clip table from score_keypoints.py
+keypoints_out/
+clip_scores.csv
+
+# Course example images for the Fashion-MNIST demo in model_app/
+model_app/examples/
