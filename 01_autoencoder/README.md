@@ -22,31 +22,35 @@ The deployed model configuration uses a threshold of **0.65884**. This is the 90
 
 ## Setups compared
 
-The table below reports the saved comparison run. Precision and recall use that run’s threshold for each setup. The two reference methods are comparison baselines, not autoencoders.
+The table below reports the deployed run (the one whose setup A weights are in `models/keypoint/model.onnx`, SHA-256 `67fc9551…`). Precision and recall use each setup's own validation 90th-percentile threshold. The two reference methods are comparison baselines, not autoencoders.
 
 | Setup | Parameters | Validation MSE (normal) | Test MSE (all) | Test ROC AUC | Test precision | Test recall |
 |---|---:|---:|---:|---:|---:|---:|
-| **A — Dense, latent 16 (selected)** | 423,792 | **0.2086** | **0.4495** | 0.788 | 0.881 | 0.536 |
-| B — Conv1D, latent 16 | 78,066 | 0.3073 | 0.7473 | 0.801 | 0.885 | 0.496 |
-| C — Conv1D, latent 8 | 71,914 | 0.3067 | 0.7712 | 0.809 | 0.895 | 0.552 |
+| **A — Dense, latent 16 (deployed)** | 423,792 | **0.2079** | **0.4320** | 0.784 | 0.846 | 0.419 |
+| B — Conv1D, latent 16 | 78,066 | 0.3095 | 0.7845 | 0.807 | 0.901 | 0.585 |
+| C — Conv1D, latent 8 | 71,914 | 0.3040 | 0.8689 | 0.814 | 0.913 | 0.637 |
 | Reference — PCA, 8 components | 13,056 | 0.2670 | 0.4504 | 0.766 | 0.238 | 0.020 |
 | Reference — pose deviation | — | — | — | **0.843** | 0.891 | **0.657** |
 
-Setup A was selected for the app because it had the lowest validation reconstruction MSE among the three autoencoder candidates, while retaining useful separation on the held-out participants. It does **not** lead every metric: the pose-deviation reference has a higher test ROC AUC and recall. This is a small, participant-limited evaluation, not evidence of general performance on all construction footage.
+Setup A was selected for the app because it had the lowest validation reconstruction MSE among the three autoencoder candidates. It does **not** lead every metric: setups B and C and the pose-deviation reference all have a higher test ROC AUC and recall. This is a small, participant-limited evaluation, not evidence of general performance on all construction footage.
 
-The comparison table is also available as [`setups_table.csv`](../reports/keypoint/setups_table.csv). The notebook run reports a threshold of 0.67649 for setup A. The deployed ONNX package stores 0.65884 instead; this calibration difference is documented in the root README. Using the deployed threshold on the held-out test windows, 133 of 248 comparison windows and 18 of 148 reference windows were flagged (F1 = 0.667). Do not mix these deployed-threshold counts with the per-setup precision/recall values above.
+Setup A's architecture: 48 × 34 input → 128 → 16-number latent code → 128 → 48 × 34 reconstruction. At the live threshold (0.6588) on the 396 held-out test windows: TN 129, FP 19, FN 144, TP 104 (precision 0.846, recall 0.419, F1 0.561). These values are in [`deployed_run_setups_table.csv`](../reports/keypoint/deployed_run_setups_table.csv) and [`deployed_eval_summary.json`](../reports/keypoint/deployed_eval_summary.json).
+
+> **Legacy evidence, not the deployed model.** [`setups_table.csv`](../reports/keypoint/setups_table.csv) and [`pmin_sensitivity.csv`](../reports/keypoint/pmin_sensitivity.csv) come from a different, non-deployed training run (setup A: validation MSE 0.2086, threshold 0.6765, ROC AUC 0.788, precision 0.881, recall 0.536). Its weights are not in this repository, so those results cannot be reproduced. They are kept for the record only; see [`reports/keypoint/README.md`](../reports/keypoint/README.md).
 
 ## Figures
 
-**Keypoint anomaly evaluation.** This figure summarizes the test-window reconstruction errors and threshold used to flag windows.
+**Deployed model: test-window errors.** Reconstruction error of the 396 test windows from the deployed model, with the live threshold.
 
-![Keypoint anomaly evaluation](../reports/keypoint/keypoint_anomaly_figure.png)
+![Deployed model test-window reconstruction errors](../docs/images/model/keypoint_test_errors.png)
+
+**Legacy evidence (non-deployed run).** [`keypoint_anomaly_figure.png`](../reports/keypoint/keypoint_anomaly_figure.png) shows the same kind of view for the earlier, non-deployed run. It is not a deployed-model result.
 
 **Posture-angle context by activity.** This is a descriptive view of the keypoint data; it is not the autoencoder’s anomaly score and does not measure fatigue or safety.
 
 ![Posture angles by task](../reports/keypoint/posture_angles_figure.png)
 
-The sensitivity and posture reports are in [`reports/keypoint/`](../reports/keypoint/). The comparison values are in [`setups_table.csv`](../reports/keypoint/setups_table.csv).
+The posture reports are in [`reports/keypoint/`](../reports/keypoint/). The deployed comparison values are in [`deployed_run_setups_table.csv`](../reports/keypoint/deployed_run_setups_table.csv); the `pmin` sensitivity table there ([`pmin_sensitivity.csv`](../reports/keypoint/pmin_sensitivity.csv)) is legacy evidence from the non-deployed run.
 
 
 ## Model files
@@ -57,7 +61,7 @@ The trained artifacts are published in the [Motion Atlas Hugging Face model repo
 
 - Only two participants are in the held-out test split. Results can change substantially with more participants, different clothing, camera angles, occlusion, or detector errors.
 - The autoencoder learns reference-task movement patterns; it has no fatigue, workload, injury, or safety labels. A flagged window means “different from this reference,” not “unsafe” or “fatigued.”
-- The pose-deviation reference outperforms the selected autoencoder on test ROC AUC in this run. The app uses the autoencoder for its reconstruction-based score, not because it wins every benchmark metric.
+- The pose-deviation reference (and setups B and C) outperform the selected autoencoder on test ROC AUC in this run. The app uses the autoencoder for its reconstruction-based score, not because it wins every benchmark metric.
 - Tracking, keypoint confidence, and preprocessing can affect what reaches the model. Multi-person identity tracking remains experimental.
 - The selected model and threshold are a prototype evaluation and require broader validation before operational use.
 
@@ -67,6 +71,7 @@ The trained artifacts are published in the [Motion Atlas Hugging Face model repo
 - [`keypoint_utils.py`](keypoint_utils.py) — keypoint loading, splitting, preprocessing, and window construction.
 - [`video_to_keypoints.py`](video_to_keypoints.py) — extracts keypoint CSVs from video for evaluation workflows.
 - [`score_keypoints.py`](score_keypoints.py) — scores a keypoint CSV or folder with the saved model.
-- [`reports/keypoint/setups_table.csv`](../reports/keypoint/setups_table.csv) — setup comparison metrics.
+- [`reports/keypoint/deployed_run_setups_table.csv`](../reports/keypoint/deployed_run_setups_table.csv) — setup comparison metrics for the deployed run.
+- [`reports/keypoint/setups_table.csv`](../reports/keypoint/setups_table.csv), [`pmin_sensitivity.csv`](../reports/keypoint/pmin_sensitivity.csv), [`keypoint_anomaly_figure.png`](../reports/keypoint/keypoint_anomaly_figure.png) — **legacy evidence from the non-deployed run**; not deployed-model results.
 
 Dataset: Mäkelä et al., VTT-ConIoT, [Zenodo record 4683703](https://doi.org/10.5281/zenodo.4683703).

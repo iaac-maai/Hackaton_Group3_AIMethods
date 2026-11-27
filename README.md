@@ -29,7 +29,7 @@ Motion Atlas lets a site lead pick a work video and see **when a worker's moveme
 | Model evaluation tab (interactive 3D graphs) | `03_app/public/graphs/` | On `main` (PR #7); local tests pass; not yet deployed |
 | Final diagrams | `04_final/diagrams/` | Done: four SVG + PNG diagrams |
 
-Checks: the app's test suite (`npm test` in `03_app`) passes, 145 tests; the app and Worker typecheck cleanly.
+Checks: the app's test suite (`npm test` in `03_app`) passes, 208 tests; the app and Worker typecheck cleanly. After a clean install (`npm ci`), `npm run build` passes; Vite warns that the main JS chunk is over 500 kB. On an older `node_modules` without the font packages (`@fontsource/michroma`, `@fontsource/jost`), the Vite step fails, so run `npm ci` first.
 
 ## How it works
 
@@ -103,12 +103,12 @@ A reconstructs reference movement best, which is why it was chosen. But it does 
 
 "Comparison task" is a group of different activities, not a label of unsafe or abnormal movement. These numbers measure how well reconstruction error separates two task groups for two held-out workers. They are not an accuracy, and not a measure of fatigue or safety.
 
-The **Model** tab in the app shows interactive 3D views: input against reconstruction, the validation error distribution, a per-window score track, a confusion matrix with a movable threshold, and split coverage. Its built-in data is from the earlier run described below.
+The **Model** tab in the app shows interactive 3D views: input against reconstruction, the validation error distribution, a per-window score track, a confusion matrix with a movable threshold, and split coverage. Its built-in data comes from the deployed model (`67fc9551…`, threshold 0.6588).
 
 ### Evidence notes
 
 - **Two training runs are in the repository; only one is deployed.** The live API loads `keypoint/model.onnx` from Hugging Face. On 27 Nov 2026 that file had the same SHA-256 (`67fc9551…`) as `models/keypoint/model.onnx`, and the live `/health` reported threshold 0.6588. Re-scoring that file reproduces the notebook's saved outputs exactly (validation MSE 0.207885, threshold 0.65884), so every number above comes from that run.
-- **Older figures from the other run.** [`reports/keypoint/setups_table.csv`](reports/keypoint/setups_table.csv), [`pmin_sensitivity.csv`](reports/keypoint/pmin_sensitivity.csv), [`keypoint_anomaly_figure.png`](reports/keypoint/keypoint_anomaly_figure.png) and the Model tab's built-in data come from a different run: validation MSE 0.2086, threshold 0.6765, precision 0.881, recall 0.536. That run's weights are not in this repository or on Hugging Face, so its results can't be reproduced. An earlier version of this README quoted them for the deployed model. **Needs review:** regenerate or retire those files and the Model tab data.
+- **Legacy evidence from the non-deployed run.** [`reports/keypoint/setups_table.csv`](reports/keypoint/setups_table.csv), [`pmin_sensitivity.csv`](reports/keypoint/pmin_sensitivity.csv) and [`keypoint_anomaly_figure.png`](reports/keypoint/keypoint_anomaly_figure.png) are kept for the record but are **not deployed-model results** (see [`reports/keypoint/README.md`](reports/keypoint/README.md)). They come from a different run: validation MSE 0.2086, threshold 0.6765, precision 0.881, recall 0.536. That run's weights are not in this repository or on Hugging Face, so its results can't be reproduced. An earlier version of this README, and the Model tab, quoted them for the deployed model; the Model tab now uses the deployed run's window errors.
 - **Re-running:** `python 01_autoencoder/evaluate_deployed_keypoint.py` (needs the VTT-ConIoT keypoint CSVs in `data/`), then `extract_notebook_results.py` and `make_readme_figures.py`. Nothing is retrained.
 
 ## Repository map
@@ -150,7 +150,7 @@ The local database and password are separate from the deployed ones. Deployment 
 ## Limits
 
 - **One reference activity group.** The model learned walking and cart pushing; any other activity scores as "different", by design. A flag means "review this window", not "this movement is wrong".
-- **Recall is moderate.** About half of the comparison windows stay under the threshold (recall 0.536).
+- **Recall is moderate.** 144 of the 248 comparison test windows stay under the threshold (recall 0.419).
 - **Two test workers.** Only participants 12 and 13 were held out, so results may not generalize to other people or camera setups.
 - **2D pose from one camera.** MoveNet keypoints are approximate; knees and ankles are often missed, and the app warns when they are. The training data's pose detector is unknown.
 - **Prototype security.** One shared team password protects the app, and everyone who has it shares the same History. Do not analyse confidential footage or sensitive personal data.

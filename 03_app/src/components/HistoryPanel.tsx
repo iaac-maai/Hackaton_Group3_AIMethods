@@ -24,24 +24,16 @@ const dateFmt = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeSt
 export function HistoryPanel({ state, selectedId, busyId, actionError, onSelect, onDelete, onRetry }: Props) {
   return (
     <section className="history" id="history" aria-labelledby="history-title">
-<<<<<<< HEAD
-      <h2 id="history-title">History</h2>
-      <p className="muted">
-        Recent analyses in the team’s shared History (summaries and window scores only, no video or keypoints).
-        Everyone who logs in with the team password can see, open and delete them. This is a prototype, so don’t
-        analyse confidential footage.
-      </p>
-=======
       <div className="history-head">
         <h2 id="history-title">History</h2>
         <InfoTip label="About History">
           <p>
-            Recent analyses saved to your account (summaries and window scores only, no video or keypoints). Only you can see
-            them, on any device where you’re logged in. This is a prototype, so don’t analyse confidential footage.
+            Recent analyses in the team’s shared History (summaries and window scores only, no video or keypoints).
+            Everyone who logs in with the team password can see, open and delete them. This is a prototype, so don’t
+            analyse confidential footage.
           </p>
         </InfoTip>
       </div>
->>>>>>> origin/main
       {state.kind === "loading" && <p role="status">Loading saved analyses…</p>}
       {state.kind === "error" && (
         <div className="error-box" role="alert">
