@@ -12,6 +12,11 @@ import { ScoreTimeline } from "./ScoreTimeline";
 import { ThresholdControl } from "./ThresholdControl";
 import { VideoPlayer, type OverlayTrack, type VideoPlayerHandle } from "./VideoPlayer";
 import type { ReviewClip } from "../review";
+import { IconAlert, IconCheckShield, IconClock, IconCpu, IconEye, IconFrame, IconTag, IconUsers } from "./ui/Icons";
+import { InfoTip } from "./ui/InfoTip";
+import { Ring } from "./ui/Ring";
+import { ScoreBar } from "./ui/ScoreBar";
+import { VisibilityStrip, WindowBlocks } from "./ui/TrackStrips";
 
 // Multi-person mode. Every detected person gets a temporary label (Track A, B, C …)
 // that only applies within this clip. Each track is scored separately, per continuous segment, with
@@ -54,6 +59,7 @@ export function MultiPersonAnalysis({ file, settings, onBusy, onAddToReview, inR
   const [stretchIdx, setStretchIdx] = useState<number | null>(null);   // chosen stretch; null = first scored one
   const [showSkeleton, setShowSkeleton] = useState(true);
   const [userThreshold, setUserThreshold] = useState<number | null>(null);
+  const [hoverWin, setHoverWin] = useState<number | null>(null);   // display only: links chart, window blocks and moment buttons
   const player = useRef<VideoPlayerHandle>(null);
   const runId = useRef(0);
 
@@ -175,11 +181,24 @@ export function MultiPersonAnalysis({ file, settings, onBusy, onAddToReview, inR
 
   return (
     <section className="multi" aria-label="Multiple-people analysis">
-      <p className="multi-note">
-        Track A, B, C … labels apply only within this video and don’t identify a worker. Tracking can miss or switch people, especially when
-        they’re small, partly hidden or close together, so check the overlay. Each track is scored separately with the same model and
-        trained threshold. These results aren’t saved to History.
-      </p>
+      <div className="note-panel mo-fade-up">
+        <span className="note-panel-icon"><IconAlert /></span>
+        <div>
+          <ul className="chip-row" aria-label="Notes">
+            <li className="chip-tag">Labels are per video</li>
+            <li className="chip-tag">Check the overlay</li>
+            <li className="chip-tag">Not saved to History</li>
+          </ul>
+          <details className="details-tag">
+            <summary>Details</summary>
+            <p className="multi-note-text">
+              Track A, B, C … labels apply only within this video and don’t identify a worker. Tracking can miss or switch people, especially when
+              they’re small, partly hidden or close together, so check the overlay. Each track is scored separately with the same model and
+              trained threshold. These results aren’t saved to History.
+            </p>
+          </details>
+        </div>
+      </div>
 
       {stage.kind === "loading" && <p role="status">Loading the multi-person pose model…</p>}
       {stage.kind === "extracting" && <p role="status">Finding people… {stage.total ? `${stage.done} / ${stage.total} frames` : "opening video"}</p>}
@@ -188,12 +207,18 @@ export function MultiPersonAnalysis({ file, settings, onBusy, onAddToReview, inR
 
       {tracked && extraction && (
         <>
-          <p className="muted">
-            {tracked.tracks.length === 0 ? "No person was tracked long enough to label." :
-              `${tracked.tracks.length} track${tracked.tracks.length > 1 ? "s" : ""} labelled · up to ${tracked.maxPeople} people detected in one frame`}
-            {tracked.brief.length > 0 && ` · ${tracked.brief.length} brief detection${tracked.brief.length > 1 ? "s" : ""} (under 0.5 s) ignored`}
-            {` · ${MULTI_EXTRACTOR}, ${settings.maxDimension} px, ${settings.tracker === "keypoint" ? "keypoint" : "bounding-box"} tracker`}
-          </p>
+          <ul className="chip-row run-summary" aria-label="Run summary">
+            {tracked.tracks.length === 0
+              ? <li className="chip-tag"><IconTag />No person was tracked long enough to label.</li>
+              : <>
+                  <li className="chip-tag"><IconTag />{tracked.tracks.length} track{tracked.tracks.length > 1 ? "s" : ""} labelled</li>
+                  <li className="chip-tag"><IconUsers />up to {tracked.maxPeople} people detected in one frame</li>
+                </>}
+            {tracked.brief.length > 0 && <li className="chip-tag"><IconClock />{tracked.brief.length} brief detection{tracked.brief.length > 1 ? "s" : ""} (under 0.5 s) ignored</li>}
+            <li className="chip-tag"><IconCpu />{MULTI_EXTRACTOR}</li>
+            <li className="chip-tag"><IconFrame />{settings.maxDimension} px</li>
+            <li className="chip-tag"><IconEye />{settings.tracker === "keypoint" ? "keypoint" : "bounding-box"} tracker</li>
+          </ul>
           {editsCount > 0 && (
             <p className="muted">
               You changed the tracking ({editsCount} edit{editsCount > 1 ? "s" : ""}).{" "}
@@ -220,7 +245,9 @@ export function MultiPersonAnalysis({ file, settings, onBusy, onAddToReview, inR
                 <button type="button" disabled={inReview(clip.id)} onClick={() => onAddToReview(clip)}>
                   {inReview(clip.id) ? "✓ In the shift review" : "Add to shift review"}
                 </button>
-                <span className="muted">For the Schedule tab. Keeps only each track’s summary, on this page; you choose the person there.</span>
+                <InfoTip label="About adding to the shift review">
+                  <p>For the Schedule tab. Keeps only each track’s summary, on this page; you choose the person there.</p>
+                </InfoTip>
               </div>
             );
           })()}
@@ -252,8 +279,16 @@ export function MultiPersonAnalysis({ file, settings, onBusy, onAddToReview, inR
           )}
 
           {track && (
-            <div className="track-detail">
-              <h2>Track {track.label}</h2>
+            <div className="track-detail track-card mo-fade-up">
+              <div className="track-head">
+                <span className="track-swatch" style={{ background: colorOf(track.label) }} aria-hidden="true">{track.label}</span>
+                <h2>Track {track.label}</h2>
+                <span className="chip-tag"><IconClock />{trackTimes(track, tracked.frameCount).firstSeen}–{trackTimes(track, tracked.frameCount).lastSeen}</span>
+                {track.identity === "uncertain"
+                  ? <span className="chip-tag warn"><IconAlert size={15} />identity uncertain</span>
+                  : <span className="chip-tag ok"><IconCheckShield />identity consistent</span>}
+              </div>
+              <VisibilityStrip track={track} frameCount={tracked.frameCount} />
               <IdentityPanel track={track} tracks={tracked.tracks} frameCount={tracked.frameCount} disabled={busy}
                 onPlay={(sec) => player.current?.playFrom(sec)} onSeparate={separateLink} onConfirm={confirmLink} onMerge={mergeTracks} onUndoMerge={undoMerges} />
               {trackPres?.kind === "per-stretch" && (
@@ -307,26 +342,43 @@ export function MultiPersonAnalysis({ file, settings, onBusy, onAddToReview, inR
                   {score?.kind === "scored" && score.skippedSegments > 0 && (
                     <p className="muted">{score.skippedSegments} tracked stretch{score.skippedSegments > 1 ? "es" : ""} had too few visible points and {score.skippedSegments > 1 ? "were" : "was"} not scored.</p>
                   )}
+                  <WindowBlocks windows={result.windows} flagged={cls.flagged} durationS={durationS} windowS={WINDOW_S}
+                    uncertain={track.uncertain.map((u) => ({ start: u.start / FPS, end: u.end / FPS }))}
+                    hover={hoverWin} onHover={setHoverWin} canPlay={videoUrl != null}
+                    onSelect={(w) => player.current?.playFrom(w.start_seconds)} />
                   <div className="tiles">
-                    <div className={`tile tile-primary ${custom ? "is-custom" : ""}`}>
+                    <div className={`tile tile-primary has-ring ${custom ? "is-custom" : ""}`}>
+                      <Ring value={result.windows.length ? cls.count / result.windows.length : 0} />
                       <span className="tile-label">
                         {stretchView ? `Track ${track.label}, stretch ${stretchView.stretch.index} only` : `Track ${track.label}`}: windows above {custom ? "your threshold" : "threshold"}
                       </span>
                       <span className="tile-value">{cls.count} <span className="tile-of">of {result.windows.length}</span></span>
                       <span className="muted">{cls.percent.toFixed(0)}% of scored {WINDOW_S.toFixed(2)} s windows{custom && ` · ${trainedCount} at the trained threshold`}</span>
                     </div>
-                    <div className="tile">
+                    <div className="tile has-ring">
+                      <Ring value={durationS > 0 ? (result.windows.length * WINDOW_S) / durationS : 0} />
                       <span className="tile-label">Tracked and scored</span>
                       <span className="tile-value">{(result.windows.length * WINDOW_S).toFixed(1)} s</span>
                       <span className="muted">of {durationS.toFixed(1)} s video · gaps are untracked or uncertain stretches</span>
                     </div>
                   </div>
-                  <p className="muted">
-                    Scores show how much this track’s movement differs from the model’s reference movements (walking and pushing a cart).
-                    They don’t measure fatigue or workload, and they aren’t an injury-risk rating or a safety certification.
-                  </p>
+                  <div className="score-meaning">
+                    <ul className="chip-row" aria-label="What the scores mean">
+                      <li className="chip-tag">Compared with walking and pushing a cart</li>
+                      <li className="chip-tag">Not fatigue or workload</li>
+                      <li className="chip-tag">Not an injury-risk rating</li>
+                    </ul>
+                    <details className="details-tag">
+                      <summary>Details</summary>
+                      <p>
+                        Scores show how much this track’s movement differs from the model’s reference movements (walking and pushing a cart).
+                        They don’t measure fatigue or workload, and they aren’t an injury-risk rating or a safety certification.
+                      </p>
+                    </details>
+                  </div>
                   <ScoreTimeline windows={result.windows} trainedThreshold={trained} threshold={shown} flagged={cls.flagged}
-                    durationS={durationS} windowS={WINDOW_S} canPlay={videoUrl != null} onSelect={(w) => player.current?.playFrom(w.start_seconds)} />
+                    durationS={durationS} windowS={WINDOW_S} canPlay={videoUrl != null} onSelect={(w) => player.current?.playFrom(w.start_seconds)}
+                    linked={hoverWin} onHover={setHoverWin} />
                   <ThresholdControl value={shown} trained={trained} range={range} count={cls.count} total={result.windows.length}
                     trainedCount={trainedCount} onChange={(v) => setUserThreshold(clampThreshold(v, range))} />
                   {flagged.length === 0 ? <p className="moments-empty muted">No windows of Track {track.label} are above {custom ? "your" : "the trained"} threshold.</p> : (
@@ -334,8 +386,10 @@ export function MultiPersonAnalysis({ file, settings, onBusy, onAddToReview, inR
                       <h2>Flagged moments · Track {track.label}{custom && <span className="pill pill-custom">your threshold</span>}</h2>
                       <ul>
                         {flagged.map((w) => (
-                          <li key={w.window}>
+                          <li key={w.window} className={hoverWin === w.window ? "linked" : undefined}
+                            onMouseEnter={() => setHoverWin(w.window)} onMouseLeave={() => setHoverWin(null)}>
                             <button type="button" onClick={() => player.current?.playFrom(w.start_seconds)}>▶ {clock(w.start_seconds)}–{clock(w.end_seconds ?? w.start_seconds + WINDOW_S)}</button>
+                            <ScoreBar score={w.reconstruction_score} windows={result.windows} />
                             <span className="muted"> score {w.reconstruction_score.toFixed(3)}</span>
                           </li>
                         ))}

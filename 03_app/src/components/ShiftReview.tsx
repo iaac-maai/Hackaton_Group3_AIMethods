@@ -1,6 +1,24 @@
 import { useId } from "react";
 import { FATIGUE_LABEL, groupWorkers, type Fatigue, type ReviewClip, type ReviewEntry, type ReviewPlan } from "../review";
 import { EXERTION_LABEL, newId, type Exertion } from "../schedule";
+import { IconArrowRight, IconClock, IconFilm, IconInfo, IconStar, IconUsers } from "./ui/Icons";
+import { InfoTip } from "./ui/InfoTip";
+import { WindowCount } from "./ui/WindowCount";
+
+/** A row of buttons for a rating, with "Not reported" first; it writes the same values as the dropdown. */
+function RatingRow({ label, value, options, onPick }: { label: string; value: string; options: [string, string][]; onPick: (v: string) => void }) {
+  return (
+    <div className="rating-row" role="group" aria-label={label}>
+      <span className="rating-label">{label}</span>
+      <span className="rating-buttons">
+        {([["", "Not reported"], ...options] as [string, string][]).map(([k, text]) => (
+          <button key={k || "none"} type="button" className={`rating-btn ${value === k ? "on" : ""} ${k ? "" : "none"}`}
+            aria-pressed={value === k} onClick={() => onPick(k)}>{text}</button>
+        ))}
+      </span>
+    </div>
+  );
+}
 
 // Shift review: what the user tells us about each analysed clip. Page memory only.
 
@@ -15,30 +33,49 @@ interface Props {
   plan: ReviewPlan | null;             // for the selected worker
   onFill: () => void;
   onRemoveClip: (id: string) => void;
+  onGoToAnalysis?: () => void;         // display only: switch to the Analysis tab
 }
+
+/** The letter for a track circle: "Track A" -> "A"; otherwise the label's first character. */
+const trackLetter = (label: string) => /^Track (\w+)/.exec(label)?.[1] ?? label.slice(0, 1).toUpperCase();
 
 export const emptyEntry = (clip: ReviewClip): ReviewEntry => ({
   id: newId("r"), clipId: clip.id, trackKey: (clip.tracks.find((t) => t.scored) ?? clip.tracks[0])?.key ?? "single",
   worker: "", task: "", timeInShift: "", minutes: null, exertion: "", fatigue: "",
 });
 
-export function ShiftReview({ clips, entries, onEntries, confirmed, onConfirm, basis, onBasis, plan, onFill, onRemoveClip }: Props) {
+export function ShiftReview({ clips, entries, onEntries, confirmed, onConfirm, basis, onBasis, plan, onFill, onRemoveClip, onGoToAnalysis }: Props) {
   const uid = useId();
   const groups = groupWorkers(entries);
   const set = (id: string, patch: Partial<ReviewEntry>) => onEntries((es) => es.map((e) => (e.id === id ? { ...e, ...patch } : e)));
   const group = groups.find((g) => g.key === basis) ?? null;
 
   return (
-    <section className="card review" aria-labelledby={`${uid}-title`}>
-      <h3 id={`${uid}-title`}>Shift review <span className="muted review-optional">(optional)</span></h3>
-      <p className="muted">
-        Add analysed clips from the Analysis tab, then tell the planner what each one shows: the worker, the task, roughly when and for how long,
-        and the worker’s own ratings of how hard it felt. These ratings and your task details drive the next-day draft. Movement-deviation
-        results are shown only as context. They don’t measure fatigue or workload and aren’t used to set tasks or breaks. Nothing here is saved.
-      </p>
+    <section className="card review mo-fade-up" aria-labelledby={`${uid}-title`}>
+      <div className="review-title-row">
+        <h3 id={`${uid}-title`}>Shift review <span className="muted review-optional">(optional)</span></h3>
+        <InfoTip label="About the shift review">
+          <p>
+            Add analysed clips from the Analysis tab, then tell the planner what each one shows: the worker, the task, roughly when and for how long,
+            and the worker’s own ratings of how hard it felt. These ratings and your task details drive the next-day draft. Movement-deviation
+            results are shown only as context. They don’t measure fatigue or workload and aren’t used to set tasks or breaks. Nothing here is saved.
+          </p>
+        </InfoTip>
+      </div>
+      <ul className="icon-captions">
+        <li><IconFilm size={18} />Add analysed clips</li>
+        <li><IconStar size={18} />Add the worker’s own ratings</li>
+        <li><IconInfo size={18} />Movement results are context only</li>
+      </ul>
 
       {clips.length === 0 && (
-        <p className="review-empty">No clips yet. After an analysis, use <strong>Add to shift review</strong> under the results.</p>
+        <div className="review-empty with-icon">
+          <span className="box-icon" aria-hidden="true"><IconFilm size={22} /></span>
+          <p>No clips yet. After an analysis, use <strong>Add to shift review</strong> under the results.</p>
+          {onGoToAnalysis && (
+            <button type="button" className="button-secondary" onClick={onGoToAnalysis}>Go to Analysis <IconArrowRight /></button>
+          )}
+        </div>
       )}
 
       {clips.map((clip) => {
@@ -46,11 +83,12 @@ export function ShiftReview({ clips, entries, onEntries, confirmed, onConfirm, b
         return (
           <div key={clip.id} className="review-clip">
             <div className="review-clip-head">
-              <div>
-                <strong>{clip.name}</strong>
-                <span className="muted"> · {clip.durationS != null ? `${clip.durationS.toFixed(1)} s` : "duration not stored"} · {
-                  clip.source === "multi" ? `${clip.tracks.length} tracked ${clip.tracks.length === 1 ? "person" : "people"}` : clip.source === "saved" ? "saved analysis" : "single-person analysis"}</span>
-              </div>
+              <ul className="chip-row clip-tags">
+                <li className="chip-tag"><IconFilm /><strong>{clip.name}</strong></li>
+                <li className="chip-tag"><IconClock />{clip.durationS != null ? `${clip.durationS.toFixed(1)} s` : "duration not stored"}</li>
+                <li className="chip-tag"><IconUsers />{
+                  clip.source === "multi" ? `${clip.tracks.length} tracked ${clip.tracks.length === 1 ? "person" : "people"}` : clip.source === "saved" ? "saved analysis" : "single-person analysis"}</li>
+              </ul>
               <button type="button" className="icon-btn" aria-label={`Remove ${clip.name} from the shift review`} onClick={() => onRemoveClip(clip.id)}>✕</button>
             </div>
             {mine.map((e, i) => {
@@ -58,6 +96,15 @@ export function ShiftReview({ clips, entries, onEntries, confirmed, onConfirm, b
               return (
                 <fieldset key={e.id} className="review-entry">
                   <legend className="sr-only">{clip.name}, person {i + 1}</legend>
+                  <div className="track-circles" role="group" aria-label="Person / track">
+                    {clip.tracks.map((t) => (
+                      <button key={t.key} type="button" className={`track-circle ${e.trackKey === t.key ? "on" : ""} ${t.scored ? "" : "unscored"}`}
+                        aria-pressed={e.trackKey === t.key} disabled={clip.tracks.length < 2} title={`${t.label}${t.scored ? "" : " (not scored)"}`}
+                        onClick={() => set(e.id, { trackKey: t.key })}>
+                        <span aria-hidden="true">{trackLetter(t.label)}</span><span className="sr-only">{t.label}{t.scored ? "" : " (not scored)"}</span>
+                      </button>
+                    ))}
+                  </div>
                   <div className="review-grid">
                     <label className="field"><span>Person / track</span>
                       <select value={e.trackKey} onChange={(ev) => set(e.id, { trackKey: ev.target.value })} disabled={clip.tracks.length < 2}>
@@ -90,9 +137,18 @@ export function ShiftReview({ clips, entries, onEntries, confirmed, onConfirm, b
                       </select>
                     </label>
                   </div>
+                  <div className="rating-rows">
+                    <RatingRow label="Exertion (worker’s own rating)" value={e.exertion}
+                      options={(Object.keys(EXERTION_LABEL) as Exertion[]).map((k) => [k, EXERTION_LABEL[k]])}
+                      onPick={(v) => set(e.id, { exertion: v as Exertion | "" })} />
+                    <RatingRow label="Tiredness (worker’s own rating)" value={e.fatigue}
+                      options={(Object.keys(FATIGUE_LABEL) as Fatigue[]).map((k) => [k, FATIGUE_LABEL[k]])}
+                      onPick={(v) => set(e.id, { fatigue: v as Fatigue | "" })} />
+                  </div>
                   <div className="review-entry-foot">
                     <p className="muted context-line">
                       <span className="tag">Context only</span>{" "}
+                      {tr?.scored && <WindowCount total={tr.windows} flagged={tr.aboveTrained} />}
                       {tr?.scored ? `Movement deviation: ${tr.aboveTrained} of ${tr.windows} scored windows above the trained threshold. Not a fatigue or workload measure.`
                         : "This person wasn’t scored (not enough continuous tracking)."}
                     </p>

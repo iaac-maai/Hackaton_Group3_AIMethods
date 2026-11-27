@@ -19,6 +19,8 @@ interface Props {
   windowS: number;
   canPlay: boolean;
   onSelect: (w: ScoredWindow) => void;
+  linked?: number | null;                       // display only: window number hovered elsewhere (e.g. a flagged-moment button)
+  onHover?: (window: number | null) => void;    // display only: report the hovered window number
 }
 
 const endOf = (w: ScoredWindow, windowS: number) => w.end_seconds ?? w.start_seconds + windowS;
@@ -42,7 +44,7 @@ function useWidth<T extends HTMLElement>(fallback: number) {
   return [ref, Math.max(280, width)] as const;
 }
 
-export function ScoreTimeline({ windows, trainedThreshold, threshold, flagged, durationS, windowS, canPlay, onSelect }: Props) {
+export function ScoreTimeline({ windows, trainedThreshold, threshold, flagged, durationS, windowS, canPlay, onSelect, linked = null, onHover }: Props) {
   const [plotRef, W] = useWidth<HTMLDivElement>(720);
   const H = W < 480 ? 210 : 240;
   const [hover, setHover] = useState<number | null>(null);
@@ -56,7 +58,8 @@ export function ScoreTimeline({ windows, trainedThreshold, threshold, flagged, d
   // x ticks at least ~56 px apart, on whole seconds
   const tickStep = [1, 2, 5, 10, 15, 30, 60, 120].find((s) => (s / span) * (W - PAD.l - PAD.r) >= 56) ?? 300;
   const ticks = Array.from({ length: Math.floor(span / tickStep) + 1 }, (_, i) => i * tickStep);
-  const shown = hover ?? active;
+  const linkedIdx = linked == null ? -1 : windows.findIndex((w) => w.window === linked);
+  const shown = hover ?? (linkedIdx >= 0 ? linkedIdx : null) ?? active;
   const focused = shown == null ? null : windows[shown];
   const count = flagged.filter(Boolean).length;
 
@@ -122,8 +125,8 @@ export function ScoreTimeline({ windows, trainedThreshold, threshold, flagged, d
             const bw = Math.max(2, x1 - x0);
             const top = y(w.reconstruction_score);
             return (
-              <g key={w.window} className={`bar ${flagged[i] ? "flagged" : "normal"} ${shown === i ? "hover" : ""} ${active === i ? "active" : ""}`}
-                onMouseEnter={() => setHover(i)} onMouseLeave={() => setHover(null)} onClick={() => canPlay && onSelect(w)}>
+              <g key={w.window} className={`bar ${flagged[i] ? "flagged pulse-once" : "normal"} ${shown === i ? "hover" : ""} ${active === i ? "active" : ""}`}
+                onMouseEnter={() => { setHover(i); onHover?.(w.window); }} onMouseLeave={() => { setHover(null); onHover?.(null); }} onClick={() => canPlay && onSelect(w)}>
                 <rect className="hit" x={x0} y={PAD.t} width={bw} height={H - PAD.t - PAD.b} />
                 {active === i && <rect className="focus-ring" x={x0 - 2} y={PAD.t - 2} width={bw + 4} height={H - PAD.t - PAD.b + 4} rx={5} />}
                 <path d={barPath(x0, top, bw, y(0) - top)} />
