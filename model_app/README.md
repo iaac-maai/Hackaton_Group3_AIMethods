@@ -49,7 +49,7 @@ from gradio_client import Client
 import base64
 
 client = Client("https://<service-name>.onrender.com")
-image_b64 = base64.b64encode(open("examples/sneaker.png", "rb").read()).decode()
+image_b64 = base64.b64encode(open("path/to/image.png", "rb").read()).decode()
 print(client.predict(image_b64, api_name="/predict"))
 ```
 
@@ -62,11 +62,12 @@ Over plain HTTP, which is what the Cloudflare app does:
 | File | Contents |
 |---|---|
 | `app.py` | The preprocessing, the page and the API |
-| `anomaly_ae.onnx` | The model (architecture and weights) |
-| `anomaly_ae.pt` | The same weights for PyTorch (not used by the server) |
+| `anomaly_ae.onnx` | The model (architecture and weights); not in Git, keep a local copy |
+| `anomaly_ae.pt` | The same weights for PyTorch (not used by the server); not in Git |
 | `anomaly_ae_config.json` | Settings and threshold |
-| `examples/` | Test images |
 | `requirements.txt`, `.python-version`, `render.yaml` | What Render needs to build and start the server |
+
+Model files (`.onnx`, `.pt`) and the example test images are kept out of this repository; the server won't start until the model file is in this folder.
 
 ## Limitations
 
